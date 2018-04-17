@@ -19,7 +19,7 @@ class Model:
     def __init__(self):
         self.cooc_counts = defaultdict(int)  # p(e_l, f_k): Co-occurrences between source and target language words
         self.source_counts = defaultdict(int)  # Count of words in the source language
-        self.translation_probs = defaultdict(lambda: random.random())
+        self.translation_probs = defaultdict(float)
 
     @abc.abstractmethod
     def train(self, data: ParallelCorpus, epochs=10):
@@ -39,29 +39,34 @@ class Model1(Model):
         self.epsilon = epsilon  # Normalization constant
 
     def train(self, data: ParallelCorpus, epochs=10):
+        self.translation_probs = defaultdict(lambda: 1 / data.source_vocab_size)  # Init uniformly
+
         for epoch in range(epochs):
-            print("Starting epoch #{}...".format(epoch+1))
+            print("\nStarting epoch #{}...".format(epoch+1))
             self.cooc_counts = defaultdict(int)
             self.source_counts = defaultdict(int)
 
             for i, (source_sentence, target_sentence) in enumerate(data):
                 print(
-                    "\rProcessing sentence {}/{} ({:.2f} %)...".format(i+1, len(data), (i+1)/len(data)),
+                    "\rProcessing sentence {}/{} ({:.2f} %)...".format(i+1, len(data), (i+1)/len(data)*100),
                     end="", flush=True
                 )
                 source_sentence = self.add_null_token(source_sentence)
-                norm = 0
+                word_norms = defaultdict(float)
 
+                # E-Step
                 # Compute normalization
+                # Implicitly uniform alignment probabilities as all alignments are considered equally
                 for (source_token, target_token) in product(source_sentence, target_sentence):
-                    norm += self.translation_probs[(source_token, target_token)]
+                    word_norms[target_token] += self.translation_probs[(source_token, target_token)]
 
                 # Collect counts
                 for (source_token, target_token) in product(source_sentence, target_sentence):
                     pair = (source_token, target_token)
-                    self.cooc_counts[pair] += self.translation_probs[pair] / norm
-                    self.source_counts[source_token] += self.translation_probs[pair] / norm
+                    self.cooc_counts[pair] += self.translation_probs[pair] / word_norms[target_token]
+                    self.source_counts[source_token] += self.translation_probs[pair] / word_norms[target_token]
 
+                # M-Step
                 # Estimate probabilities
                 for (source_token, target_token) in product(source_sentence, target_sentence):
                     pair = (source_token, target_token)
@@ -86,4 +91,4 @@ if __name__ == "__main__":
         source_path="./data/training/hansards.36.2.f", target_path="./data/training/hansards.36.2.e"
     )
     model1 = Model1(epsilon=0.1)
-    model1.train(corpus)
+    model1.train(corpus, epochs=4)
