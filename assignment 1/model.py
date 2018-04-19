@@ -7,6 +7,8 @@ import abc
 from collections import defaultdict
 import time
 from itertools import product
+import pickle
+import random
 
 # EXT
 import numpy as np
@@ -28,6 +30,32 @@ class Model:
     def train(self, data: ParallelCorpus, epochs=10):
         pass
 
+    def save(self, path):
+        with open(path, "wb") as file:
+            self.translation_probs = dict(self.translation_probs)  # You can't pickle lambda functions
+            pickle.dump(self, file)
+
+    @staticmethod
+    def load(path):
+        with open(path, "rb") as file:
+            return pickle.load(file)
+
+    def init_translation_probabilities(self, mode, data, given_probs):
+        assert mode in ("uniform", "random", "continue"), "Invalid initialization mode {}".format(mode)
+
+        # Initialize uniformly
+        if mode == "uniform":
+            self.translation_probs = defaultdict(lambda: 1 / data.source_vocab_size)
+
+        # Initialize randomly
+        elif mode == "random":
+            self.translation_probs = defaultdict(lambda: random.random())
+
+        # Initialize with already trained probabilities
+        elif mode == "continue":
+            assert given_probs is not None
+            self.translation_probs = given_probs
+
     @staticmethod
     def add_null_token(sentence):
         return ["NULL"] + sentence
@@ -41,11 +69,11 @@ class Model1(Model):
         super().__init__()
         self.epsilon = epsilon  # Normalization constant
 
-    def train(self, data: ParallelCorpus, epochs=10, verbosity=1):
-        self.translation_probs = defaultdict(lambda: 1 / data.source_vocab_size)  # Init uniformly
+    def train(self, data: ParallelCorpus, epochs=10, initialization="uniform", verbosity=1, **kwargs):
         log_likelihoods = defaultdict(float)
         num_sentences = len(data)
         print_interval = int(num_sentences / 10000)
+        self.init_translation_probabilities(mode=initialization, data=data, given_probs=kwargs.get("given_probs", None))
 
         for epoch in range(epochs):
             start = time.time()
@@ -110,8 +138,6 @@ class Model1(Model):
                 print("{} -> {}: {:.6f}".format(source_token, target_token, prob))
 
 
-
-
 class Model2(Model):
     """
     Class for IBM model 2.
@@ -127,4 +153,8 @@ if __name__ == "__main__":
         source_path="./data/training/hansards.36.2.f", target_path="./data/training/hansards.36.2.e"
     )
     model1 = Model1(epsilon=0.1)
-    model1.train(corpus, epochs=4)
+    model1.train(corpus, epochs=1)
+    model1.save("./testmodel")
+    del model1
+    model1 = Model1.load("./testmodel")
+    print(model1.translation_probs)
