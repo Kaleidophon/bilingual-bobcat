@@ -8,6 +8,9 @@ from collections import defaultdict
 import random
 from itertools import product
 
+# EXT
+import numpy as np
+
 # PROJECT
 from corpus import ParallelCorpus
 
@@ -38,21 +41,29 @@ class Model1(Model):
         super().__init__()
         self.epsilon = epsilon  # Normalization constant
 
-    def train(self, data: ParallelCorpus, epochs=10):
+    def train(self, data: ParallelCorpus, epochs=10, verbosity=1):
         self.translation_probs = defaultdict(lambda: 1 / data.source_vocab_size)  # Init uniformly
+        log_likelihoods = defaultdict(float)
+        num_sentences = len(data)
+        print_interval = int(num_sentences / 10000)
 
         for epoch in range(epochs):
-            print("\nStarting epoch #{}...".format(epoch+1))
             self.cooc_counts = defaultdict(int)
             self.source_counts = defaultdict(int)
 
+            if verbosity > 0:
+                print("\nStarting epoch #{}...".format(epoch+1))
+
             for i, (source_sentence, target_sentence) in enumerate(data):
-                print(
-                    "\rProcessing sentence {}/{} ({:.2f} %)...".format(i+1, len(data), (i+1)/len(data)*100),
-                    end="", flush=True
-                )
                 source_sentence = self.add_null_token(source_sentence)
                 word_norms = defaultdict(float)
+                sentence_log_likelihood = 0
+
+                if verbosity > 0 and (i+1) % print_interval == 0:
+                    print(
+                        "\rProcessing sentence {}/{} ({:.2f} %)...".format(i+1, len(data), (i+1)/len(data)*100),
+                        end="", flush=True
+                    )
 
                 # E-Step
                 # Compute normalization
@@ -71,8 +82,23 @@ class Model1(Model):
                 for (source_token, target_token) in product(source_sentence, target_sentence):
                     pair = (source_token, target_token)
                     self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_token]
+                    sentence_log_likelihood += np.log(self.cooc_counts[pair] / self.source_counts[source_token])
 
-        print(self.translation_probs)
+                # Normalization of sentence log-likelihood by sentence lengths
+                sentence_log_likelihood += np.log(self.epsilon) - len(target_sentence) * np.log(len(source_sentence))
+                log_likelihoods[epoch] += sentence_log_likelihood
+
+            if verbosity > 0:
+                print(
+                    "\rLog-likelihood for epoch #{}: {:.4f}\n".format(epoch+1, log_likelihoods[epoch]),
+                    end="", flush=True
+                )
+
+        if verbosity > 0:
+            sorted_translation_probs = sorted(self.translation_probs.items(), key=lambda tpl: tpl[1], reverse=True)
+            for (source_token, target_token), prob in sorted_translation_probs[:50]:
+                print("{} -> {}: {:.6f}".format(source_token, target_token, prob))
+
 
 
 
