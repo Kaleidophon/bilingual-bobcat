@@ -5,7 +5,7 @@ Main module describing the IBM model 1 and 2 logic.
 # STD
 import abc
 from collections import defaultdict
-import random
+import time
 from itertools import product
 
 # EXT
@@ -48,6 +48,7 @@ class Model1(Model):
         print_interval = int(num_sentences / 10000)
 
         for epoch in range(epochs):
+            start = time.time()
             self.cooc_counts = defaultdict(int)
             self.source_counts = defaultdict(int)
 
@@ -72,25 +73,34 @@ class Model1(Model):
                     word_norms[target_token] += self.translation_probs[(source_token, target_token)]
 
                 # Collect counts
-                for (source_token, target_token) in product(source_sentence, target_sentence):
-                    pair = (source_token, target_token)
-                    self.cooc_counts[pair] += self.translation_probs[pair] / word_norms[target_token]
-                    self.source_counts[source_token] += self.translation_probs[pair] / word_norms[target_token]
+                for source_token in source_sentence:
+                    source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
+                    for target_token in target_sentence:
+                        pair = (source_token, target_token)
+                        self.cooc_counts[pair] += self.translation_probs[pair] / word_norms[target_token]
+                        self.source_counts[source_token] += self.translation_probs[pair] / word_norms[target_token]
+                        source_token_probs += self.translation_probs[(source_token, target_token)]
 
-                # M-Step
-                # Estimate probabilities
-                for (source_token, target_token) in product(source_sentence, target_sentence):
-                    pair = (source_token, target_token)
-                    self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_token]
-                    sentence_log_likelihood += np.log(self.cooc_counts[pair] / self.source_counts[source_token])
+                    sentence_log_likelihood += np.log(source_token_probs)
 
                 # Normalization of sentence log-likelihood by sentence lengths
                 sentence_log_likelihood += np.log(self.epsilon) - len(target_sentence) * np.log(len(source_sentence))
                 log_likelihoods[epoch] += sentence_log_likelihood
 
+            # M-Step
+            # Estimate probabilities
+            for (source_token, target_token) in self.translation_probs.keys():
+                pair = (source_token, target_token)
+                self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_token]
+
+            end = time.time()
+            duration = end - start
+            m, s = divmod(duration, 60)
             if verbosity > 0:
                 print(
-                    "\rLog-likelihood for epoch #{}: {:.4f}\n".format(epoch+1, log_likelihoods[epoch]),
+                    "\rLog-likelihood for epoch #{}: {:.4f}\nEpoch #{} took {} minute(s) and {:.2f} second(s).\n".format(
+                        epoch+1, log_likelihoods[epoch], epoch+1, m, s
+                    ),
                     end="", flush=True
                 )
 
