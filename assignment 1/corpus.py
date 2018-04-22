@@ -37,8 +37,10 @@ class ParallelCorpus:
         return self._source_vocab_size
 
     def __iter__(self):
-        for source_sentence, target_sentence in self.parallel_sentences:
-            yield (source_sentence, target_sentence)
+        return (
+            (source_sentence, target_sentence)
+            for source_sentence, target_sentence in zip(self.source_sentences, self.target_sentences)
+        )
 
     def __len__(self):
         return self.size

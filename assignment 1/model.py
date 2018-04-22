@@ -19,8 +19,6 @@ from corpus import ParallelCorpus
 
 # TODO
 # 1. Training Model 1 currently yields a Zero Division Error during the maximization step (that shouldn't be possible)
-# 2. Check whether the alignment direction is correct (AER is way too high)
-# 3. Are we training English -> French or French -> English?
 
 
 class AlignmentProbDict:
@@ -66,8 +64,8 @@ class Model:
         if self.eval_alignment_path is not None:
             self.gold_standard = read_naacl_alignments(self.eval_alignment_path)
 
-        self.cooc_counts = defaultdict(int)  # p(e_l, f_k): Co-occurrences between source and target language words
-        self.source_counts = defaultdict(int)  # Count of words in the source language
+        self.cooc_counts = defaultdict(float)  # p(e_l, f_k): Co-occurrences between source and target language words
+        self.source_counts = defaultdict(float)  # Count of words in the source language
         self.translation_probs = defaultdict(float)
 
     def save(self, path):
@@ -186,8 +184,8 @@ class Model1(Model):
         self.epsilon = epsilon  # Normalization constant
 
     def reset_counts(self):
-        self.cooc_counts = defaultdict(int)
-        self.source_counts = defaultdict(int)
+        self.cooc_counts = defaultdict(float)
+        self.source_counts = defaultdict(float)
 
     def expectation_step(self, data, epoch, print_interval=1, verbosity=0):
         log_likelihood = 0
@@ -207,16 +205,18 @@ class Model1(Model):
             # Compute normalization
             # Implicitly uniform alignment probabilities as all alignments are considered equally
             for (source_token, target_token) in product(source_sentence, target_sentence):
-                word_norms[target_token] += self.translation_probs[(source_token, target_token)]
+                word_norms[source_token] += self.translation_probs[(source_token, target_token)]
 
             # Collect counts
             for source_token in source_sentence:
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
                 for target_token in target_sentence:
                     pair = (source_token, target_token)
-                    delta = self.translation_probs[pair] / word_norms[target_token]
+                    delta = self.translation_probs[pair] / word_norms[source_token]
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
+
+                    # Accumulate (log-)likelihood for this sentence
                     source_token_probs += self.translation_probs[(source_token, target_token)]
 
                 sentence_log_likelihood += np.log(source_token_probs)
@@ -230,9 +230,17 @@ class Model1(Model):
     def maximization_step(self):
         # M-Step
         # Estimate probabilities
-        for (source_token, target_token) in self.translation_probs.keys():
-            pair = (source_token, target_token)
-            self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_token]
+        for (source_type, target_type) in self.translation_probs.keys():
+            try:
+                pair = (source_type, target_type)
+                self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_type]
+            except ZeroDivisionError:
+                print(
+                    "Zero case for cooc {}:{} and source {}:{}".format(
+                        str((source_type, target_type)), self.cooc_counts[pair], source_type,
+                        self.source_counts[source_type]
+                    )
+                )
 
 
 class Model2(Model1):
@@ -243,14 +251,14 @@ class Model2(Model1):
         super().__init__(
             epsilon=epsilon, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus
         )
-        self.alignment_counts = defaultdict(int)  # c(j|i, m, l)
-        self.aligned_counts = defaultdict(int)  # c(i, l, m)
+        self.alignment_counts = defaultdict(float)  # c(j|i, m, l)
+        self.aligned_counts = defaultdict(float)  # c(i, l, m)
         self.alignment_probs = AlignmentProbDict()
 
     def reset_counts(self):
         super().reset_counts()
-        self.alignment_counts = defaultdict(int)
-        self.aligned_counts = defaultdict(int)
+        self.alignment_counts = defaultdict(float)
+        self.aligned_counts = defaultdict(float)
 
     def expectation_step(self, data, epoch, print_interval=1, verbosity=0):
         log_likelihood = 0
@@ -313,13 +321,13 @@ class Model2(Model1):
 
 if __name__ == "__main__":
     corpus = ParallelCorpus(
-        source_path="./data/training/hansards.36.2.f", target_path="./data/training/hansards.36.2.e"
+        source_path="./data/training/hansards.36.2.e", target_path="./data/training/hansards.36.2.f"
     )
     eval_corpus = ParallelCorpus(
-        source_path="./data/validation/dev.f", target_path="./data/validation/dev.e"
+        source_path="./data/validation/dev.e", target_path="./data/validation/dev.f"
     )
     model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    model1.train(corpus, epochs=4)
+    model1.train(corpus, epochs=8)
     #model1.save("./model_iter20_eps01_uniform")
     #print(model1.translation_probs)
 
