@@ -105,4 +105,4 @@ def test(path):
 
 
 if __name__ == '__main__':
-    test('validation/dev.wa.nonullalign')
+    test('./data/validation/dev.wa.nonullalign')

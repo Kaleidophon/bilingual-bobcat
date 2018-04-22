@@ -14,7 +14,13 @@ import random
 import numpy as np
 
 # PROJECT
+from aer import read_naacl_alignments, AERSufficientStatistics
 from corpus import ParallelCorpus
+
+# TODO
+# 1. Training Model 1 currently yields a Zero Division Error during the maximization step (that shouldn't be possible)
+# 2. Check whether the alignment direction is correct (AER is way too high)
+# 3. Are we training English -> French or French -> English?
 
 
 class AlignmentProbDict:
@@ -53,7 +59,13 @@ class Model:
     """
     Super class defining shared functions and variables for IBM models 1 and 2.
     """
-    def __init__(self):
+    def __init__(self, eval_alignment_path=None, eval_corpus=None):
+        self.eval_alignment_path = eval_alignment_path
+        self.gold_standard = None
+        self.eval_corpus = eval_corpus
+        if self.eval_alignment_path is not None:
+            self.gold_standard = read_naacl_alignments(self.eval_alignment_path)
+
         self.cooc_counts = defaultdict(int)  # p(e_l, f_k): Co-occurrences between source and target language words
         self.source_counts = defaultdict(int)  # Count of words in the source language
         self.translation_probs = defaultdict(float)
@@ -113,6 +125,10 @@ class Model:
                     end="", flush=True
                 )
 
+            if verbosity > 0 and self.eval_corpus is not None:
+                aer = self.evaluate()
+                print("AER for epoch #{} is {:.2f}.".format(epoch+1, aer))
+
         if verbosity > 0:
             sorted_translation_probs = sorted(self.translation_probs.items(), key=lambda tpl: tpl[1], reverse=True)
             for (source_token, target_token), prob in sorted_translation_probs[:50]:
@@ -134,13 +150,39 @@ class Model:
     def maximization_step(self):
         pass
 
+    def evaluate(self):
+        if None in (self.eval_alignment_path, self.gold_standard, self.eval_corpus):
+            raise AssertionError("Evaluation data is not given.")
+
+        # Determine the models alignments via the viterbi algorithm
+        predictions = []
+        for (source_sentence, target_sentence) in self.eval_corpus:
+            links = set()
+
+            for target_pos, target_token in enumerate(target_sentence):
+                translation_probs = [
+                    self.translation_probs[(source_token, target_token)] for source_token in source_sentence
+                ]
+                source_pos = np.argmax(translation_probs)
+                links.add((source_pos+1, target_pos+1))
+
+            predictions.append(links)
+
+        # Compute AER
+        metric = AERSufficientStatistics()
+
+        for gold_alignments, predictions in zip(self.gold_standard, predictions):
+            metric.update(sure=gold_alignments[0], probable=gold_alignments[1], predicted=predictions)
+
+        return metric.aer()
+
 
 class Model1(Model):
     """
     Class for IBM model 1.
     """
-    def __init__(self, epsilon):
-        super().__init__()
+    def __init__(self, epsilon, eval_alignment_path=None, eval_corpus=None):
+        super().__init__(eval_alignment_path, eval_corpus)
         self.epsilon = epsilon  # Normalization constant
 
     def reset_counts(self):
@@ -172,8 +214,9 @@ class Model1(Model):
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
                 for target_token in target_sentence:
                     pair = (source_token, target_token)
-                    self.cooc_counts[pair] += self.translation_probs[pair] / word_norms[target_token]
-                    self.source_counts[source_token] += self.translation_probs[pair] / word_norms[target_token]
+                    delta = self.translation_probs[pair] / word_norms[target_token]
+                    self.cooc_counts[pair] += delta
+                    self.source_counts[source_token] += delta
                     source_token_probs += self.translation_probs[(source_token, target_token)]
 
                 sentence_log_likelihood += np.log(source_token_probs)
@@ -196,8 +239,10 @@ class Model2(Model1):
     """
     Class for IBM model 2.
     """
-    def __init__(self, epsilon):
-        super().__init__(epsilon=epsilon)
+    def __init__(self, epsilon, eval_alignment_path=None, eval_corpus=None):
+        super().__init__(
+            epsilon=epsilon, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus
+        )
         self.alignment_counts = defaultdict(int)  # c(j|i, m, l)
         self.aligned_counts = defaultdict(int)  # c(i, l, m)
         self.alignment_probs = AlignmentProbDict()
@@ -230,17 +275,16 @@ class Model2(Model1):
             for (source_pos, source_token), (target_pos, target_token) in pos_and_tokens:
                 word_norms[target_token] += self.translation_probs[
                     (source_token, target_token)
-                ] #* self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
+                ] * self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
 
             # Collect counts
             for source_pos, source_token in enumerate(source_sentence):
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
                 for target_pos, target_token in enumerate(target_sentence):
                     pair = (source_token, target_token)
-                    #delta = self.translation_probs[pair] * self.alignment_probs[
-                    #    (length_source, length_target, source_pos, target_pos)
-                    #] / word_norms[target_token]
-                    delta = self.translation_probs[pair] / word_norms[target_token]
+                    delta = self.translation_probs[pair] * self.alignment_probs[
+                        (length_source, length_target, source_pos, target_pos)
+                    ] / word_norms[target_token]
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
                     source_token_probs += delta
@@ -271,13 +315,16 @@ if __name__ == "__main__":
     corpus = ParallelCorpus(
         source_path="./data/training/hansards.36.2.f", target_path="./data/training/hansards.36.2.e"
     )
-    #model1 = Model1(epsilon=0.1)
-    #model1.train(corpus, epochs=20)
+    eval_corpus = ParallelCorpus(
+        source_path="./data/validation/dev.f", target_path="./data/validation/dev.e"
+    )
+    model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
+    model1.train(corpus, epochs=4)
     #model1.save("./model_iter20_eps01_uniform")
     #print(model1.translation_probs)
 
-    model2 = Model2(epsilon=0.1)
-    model2.train(corpus, epochs=4)
-    model2.save("./model2_iter4_eps01_uniform")
-    for key, value in model2.alignment_probs.items():
-        print(key, value)
+    # model2 = Model2(epsilon=0.1)
+    # model2.train(corpus, epochs=4)
+    # model2.save("./model2_iter4_eps01_uniform")
+    # for key, value in model2.alignment_probs.items():
+    #     print(key, value)
