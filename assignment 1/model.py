@@ -18,7 +18,7 @@ from aer import read_naacl_alignments, AERSufficientStatistics
 from corpus import ParallelCorpus
 
 # TODO
-# 1. Training Model 1 currently yields a Zero Division Error during the maximization step (that shouldn't be possible)
+# - IBM2 log-likelihood falls after some point instead of increasing
 
 
 class AlignmentProbDict:
@@ -45,6 +45,9 @@ class AlignmentProbDict:
 
     def keys(self):
         return self.core.keys()
+
+    def items(self):
+        return self.core.items()
 
     def __repr__(self):
         return self.core.__repr__()
@@ -231,16 +234,11 @@ class Model1(Model):
         # M-Step
         # Estimate probabilities
         for (source_type, target_type) in self.translation_probs.keys():
+            pair = (source_type, target_type)
             try:
-                pair = (source_type, target_type)
                 self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_type]
             except ZeroDivisionError:
-                print(
-                    "Zero case for cooc {}:{} and source {}:{}".format(
-                        str((source_type, target_type)), self.cooc_counts[pair], source_type,
-                        self.source_counts[source_type]
-                    )
-                )
+                self.translation_probs[pair] = 0
 
 
 class Model2(Model1):
@@ -281,7 +279,7 @@ class Model2(Model1):
             # Implicitly uniform alignment probabilities as all alignments are considered equally
             pos_and_tokens = product(enumerate(source_sentence), enumerate(target_sentence))
             for (source_pos, source_token), (target_pos, target_token) in pos_and_tokens:
-                word_norms[target_token] += self.translation_probs[
+                word_norms[source_token] += self.translation_probs[
                     (source_token, target_token)
                 ] * self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
 
@@ -292,10 +290,12 @@ class Model2(Model1):
                     pair = (source_token, target_token)
                     delta = self.translation_probs[pair] * self.alignment_probs[
                         (length_source, length_target, source_pos, target_pos)
-                    ] / word_norms[target_token]
+                    ] / word_norms[source_token]
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
-                    source_token_probs += delta
+                    source_token_probs += self.translation_probs[pair] * self.alignment_probs[
+                        (length_source, length_target, source_pos, target_pos)
+                    ]
 
                     self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
                     self.aligned_counts[(length_source, length_target, source_pos)] += delta
@@ -326,13 +326,12 @@ if __name__ == "__main__":
     eval_corpus = ParallelCorpus(
         source_path="./data/validation/dev.e", target_path="./data/validation/dev.f"
     )
-    model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    model1.train(corpus, epochs=8)
+
+    #model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
+    #model1.train(corpus, epochs=8)
     #model1.save("./model_iter20_eps01_uniform")
     #print(model1.translation_probs)
 
-    # model2 = Model2(epsilon=0.1)
-    # model2.train(corpus, epochs=4)
-    # model2.save("./model2_iter4_eps01_uniform")
-    # for key, value in model2.alignment_probs.items():
-    #     print(key, value)
+    model2 = Model2(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
+    model2.train(corpus, epochs=10)
+    #model2.save("./model2_iter4_eps01_uniform")
