@@ -18,7 +18,7 @@ from aer import read_naacl_alignments, AERSufficientStatistics
 from corpus import ParallelCorpus
 
 # TODO
-# - IBM2 log-likelihood falls after some point instead of increasing
+# - Write result files
 
 
 class AlignmentProbDict:
@@ -79,7 +79,13 @@ class Model:
     @staticmethod
     def load(path):
         with open(path, "rb") as file:
-            return pickle.load(file)
+            model = pickle.load(file)
+
+            # Re-instate the defaultdict
+            loaded_translation_probs = model.translation_probs
+            model.translation_probs = defaultdict(float)
+            model.translation_probs.update(loaded_translation_probs)
+            return model
 
     def init_translation_probabilities(self, mode, data, given_probs):
         assert mode in ("uniform", "random", "continue"), "Invalid initialization mode {}".format(mode)
@@ -126,9 +132,8 @@ class Model:
                     end="", flush=True
                 )
 
-            if verbosity > 0 and self.eval_corpus is not None:
-                aer = self.evaluate()
-                print("AER for epoch #{} is {:.2f}.".format(epoch+1, aer))
+            if self.eval_corpus is not None:
+                self.evaluate(verbosity=verbosity)
 
         if verbosity > 0:
             sorted_translation_probs = sorted(self.translation_probs.items(), key=lambda tpl: tpl[1], reverse=True)
@@ -151,7 +156,15 @@ class Model:
     def maximization_step(self):
         pass
 
-    def evaluate(self):
+    def evaluate(self, eval_alignment_path=None, eval_corpus=None, verbosity=1):
+        # Overwrite evaluation data if necessary
+        # (Helpful e.g. when you load a model and want to evaluate it on some given data)
+        if eval_alignment_path is not None:
+            self.eval_alignment_path = eval_alignment_path
+            self.gold_standard = read_naacl_alignments(self.eval_alignment_path)
+        if eval_corpus is not None:
+            self.eval_corpus = eval_corpus
+
         if None in (self.eval_alignment_path, self.gold_standard, self.eval_corpus):
             raise AssertionError("Evaluation data is not given.")
 
@@ -175,7 +188,12 @@ class Model:
         for gold_alignments, predictions in zip(self.gold_standard, predictions):
             metric.update(sure=gold_alignments[0], probable=gold_alignments[1], predicted=predictions)
 
-        return metric.aer()
+        aer = metric.aer()
+
+        if verbosity > 0:
+            print("AER is {:.2f}.".format(aer))
+
+        return aer
 
 
 class Model1(Model):
@@ -326,12 +344,26 @@ if __name__ == "__main__":
     eval_corpus = ParallelCorpus(
         source_path="./data/validation/dev.e", target_path="./data/validation/dev.f"
     )
+    test_corpus = ParallelCorpus(
+        source_path="./data/testing/test/test.e", target_path="./data/testing/test/test.f"
+    )
+    test_alignments = "./data/testing/answers/test.wa.nonullalign"
 
     #model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    #model1.train(corpus, epochs=8)
-    #model1.save("./model_iter20_eps01_uniform")
+    #model1.train(corpus, epochs=10, initialization="random")
+    #model1.save("./model_iter10_eps01_uniform")
     #print(model1.translation_probs)
+    # model1 = Model1.load("./model_iter10_eps01_uniform")
+    #
+    # model2 = Model2(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
+    # model2.train(corpus, epochs=10, initialization="continue", given_probs=model1.translation_probs)
+    # model2.save("./model2_iter10_eps01_continue")
 
-    model2 = Model2(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    model2.train(corpus, epochs=10)
-    #model2.save("./model2_iter4_eps01_uniform")
+    # Evaluate
+    print("Evaluating model 1...")
+    model1 = Model1.load("./model_iter10_eps01_uniform")
+    model1.evaluate(eval_alignment_path=test_alignments, eval_corpus=test_corpus)
+
+    print("Evaluating model 2...")
+    model2 = Model2.load("./model2_iter10_eps01_continue")
+    model2.evaluate(eval_alignment_path=test_alignments, eval_corpus=test_corpus)
