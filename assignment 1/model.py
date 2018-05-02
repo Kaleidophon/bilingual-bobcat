@@ -9,6 +9,7 @@ import time
 from itertools import product
 import pickle
 import random
+import os
 
 # EXT
 import numpy as np
@@ -18,8 +19,6 @@ from aer import read_naacl_alignments, AERSufficientStatistics
 from corpus import ParallelCorpus
 
 # TODO
-# - Write result files
-# - Use training and validation data for training
 # - Variational Bayes
 # - Jump distribution reparameterization
 
@@ -159,7 +158,7 @@ class Model:
     def maximization_step(self):
         pass
 
-    def evaluate(self, eval_alignment_path=None, eval_corpus=None, verbosity=1):
+    def evaluate(self, eval_alignment_path=None, eval_corpus=None, result_path=None, verbosity=1):
         # Overwrite evaluation data if necessary
         # (Helpful e.g. when you load a model and want to evaluate it on some given data)
         if eval_alignment_path is not None:
@@ -168,12 +167,17 @@ class Model:
         if eval_corpus is not None:
             self.eval_corpus = eval_corpus
 
+        # Delete result file if necessary
+        if result_path is not None:
+            if os.path.isfile(result_path):
+                os.remove(result_path)
+
         if None in (self.eval_alignment_path, self.gold_standard, self.eval_corpus):
             raise AssertionError("Evaluation data is not given.")
 
         # Determine the models alignments via the viterbi algorithm
         predictions = []
-        for (source_sentence, target_sentence) in self.eval_corpus:
+        for sentence_no, (source_sentence, target_sentence) in enumerate(self.eval_corpus):
             links = set()
 
             for target_pos, target_token in enumerate(target_sentence):
@@ -184,6 +188,13 @@ class Model:
                 links.add((source_pos+1, target_pos+1))
 
             predictions.append(links)
+
+            # Write predictions into file if path to result file is given
+            # Format: sentence_no position_L1 position_L2 [S P]
+            if result_path is not None:
+                with open(result_path, "a") as result_file:
+                    for link in links:
+                        result_file.write("{} {} {} S\n".format(str(sentence_no).zfill(4), *link))
 
         # Compute AER
         metric = AERSufficientStatistics()
@@ -353,8 +364,8 @@ if __name__ == "__main__":
     )
     test_alignments = "./data/testing/answers/test.wa.nonullalign"
 
-    model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    model1.train(corpus, epochs=10, initialization="random")
+    #model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
+    #model1.train(corpus, epochs=10, initialization="random")
     #model1.save("./model_iter10_eps01_uniform")
     #print(model1.translation_probs)
     # model1 = Model1.load("./model_iter10_eps01_uniform")
@@ -366,8 +377,12 @@ if __name__ == "__main__":
     # Evaluate
     print("Evaluating model 1...")
     model1 = Model1.load("./model_iter10_eps01_uniform")
-    model1.evaluate(eval_alignment_path=test_alignments, eval_corpus=test_corpus)
+    model1.evaluate(
+        eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
+    )
 
     print("Evaluating model 2...")
     model2 = Model2.load("./model2_iter10_eps01_continue")
-    model2.evaluate(eval_alignment_path=test_alignments, eval_corpus=test_corpus)
+    model2.evaluate(
+        eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm2.mle.naacl"
+    )
