@@ -19,6 +19,9 @@ from corpus import ParallelCorpus
 
 # TODO
 # - Write result files
+# - Use training and validation data for training
+# - Variational Bayes
+# - Jump distribution reparameterization
 
 
 class AlignmentProbDict:
@@ -339,7 +342,8 @@ class Model2(Model1):
 
 if __name__ == "__main__":
     corpus = ParallelCorpus(
-        source_path="./data/training/hansards.36.2.e", target_path="./data/training/hansards.36.2.f"
+        source_path=["./data/training/hansards.36.2.e", "./data/validation/dev.e"],
+        target_path=["./data/training/hansards.36.2.f", "./data/validation/dev.f"]
     )
     eval_corpus = ParallelCorpus(
         source_path="./data/validation/dev.e", target_path="./data/validation/dev.f"
@@ -349,8 +353,8 @@ if __name__ == "__main__":
     )
     test_alignments = "./data/testing/answers/test.wa.nonullalign"
 
-    #model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    #model1.train(corpus, epochs=10, initialization="random")
+    model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
+    model1.train(corpus, epochs=10, initialization="random")
     #model1.save("./model_iter10_eps01_uniform")
     #print(model1.translation_probs)
     # model1 = Model1.load("./model_iter10_eps01_uniform")
