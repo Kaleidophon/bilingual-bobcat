@@ -13,7 +13,7 @@ import os
 
 # EXT
 import numpy as np
-from scipy.special import digamma
+from scipy.special import digamma, gamma, loggamma
 
 # PROJECT
 from aer import read_naacl_alignments, AERSufficientStatistics
@@ -273,7 +273,7 @@ class Model1(Model):
             try:
                 self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_type]
             except ZeroDivisionError:
-                self.translation_probs[pair] = 0
+                self.translation_probs[pair] = 0  # TODO: This "fix" is wrong
 
 
 class VariationalModel1(Model1):
@@ -351,12 +351,48 @@ class VariationalModel1(Model1):
             sentence_log_likelihood += np.log(self.epsilon) - len(target_sentence) * np.log(len(source_sentence))
             log_likelihood += sentence_log_likelihood
 
+        elbo = self.elbo(log_likelihood)
+
+        if verbosity > 0:
+            print("\nELBO for epoch #{} is {:.4f}".format(epoch+1, elbo))
+
         return log_likelihood
 
     def maximization_step(self):
         # M-Step
         # This is for convenience already done in the E-step, this function is only here for consistency
         pass
+
+    def elbo(self, log_likelihood):
+        """
+        Calculate the expected lower bound for the variational bayes model.
+        """
+        divergence_sum = 0
+
+        for source_type in self.translation_probs.keys():
+            source_norm = digamma(sum(self.lambdas[source_type].values()))
+            target_types = self.translation_probs[source_type].keys()
+
+            theta_sum = 0  # Sum over all probabilities theta_f|e and other terms for all f in V_f
+            alpha_sum = 0  # Sum over all alpha_f for all f in V_f
+            lambda_sum = 0  # Sum over all lambda_f|e for all f in V_f
+
+            for target_type in target_types:
+                current_lambda = self.lambdas[source_type][target_type]
+                sufficient_statistic = digamma(current_lambda) - source_norm
+
+                # Update sums (using constant alpha_f for all f in V_f)
+                theta_sum += sufficient_statistic * (self.alpha - current_lambda) + loggamma(current_lambda) - loggamma(self.alpha)
+                alpha_sum += self.alpha
+                lambda_sum += current_lambda
+
+            # We calculate the KL divergence for every source type and sum them together in the end
+            kl_divergence = theta_sum + loggamma(alpha_sum) - loggamma(lambda_sum)
+            divergence_sum += kl_divergence
+
+        print("KL divergence is {:.4f}".format(divergence_sum.real))
+
+        return log_likelihood - divergence_sum.real
 
 
 class Model2(Model1):
@@ -461,7 +497,7 @@ if __name__ == "__main__":
     # model2.save("./model2_iter10_eps01_continue")
 
     varmodel1 = VariationalModel1(
-        alpha=0.001, epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+        alpha=0.1, epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
     )
     varmodel1.train(corpus, epochs=10, initialization="random")
 
