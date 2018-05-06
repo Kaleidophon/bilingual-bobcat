@@ -14,13 +14,13 @@ import os
 # EXT
 import numpy as np
 from scipy.special import digamma, gamma, loggamma
+import matplotlib.pyplot as plt
 
 # PROJECT
 from aer import read_naacl_alignments, AERSufficientStatistics
 from corpus import ParallelCorpus
 
 # TODO
-# - Variational Bayes
 # - Jump distribution reparameterization
 
 
@@ -63,10 +63,15 @@ class Model:
     """
     Super class defining shared functions and variables for IBM models 1 and 2.
     """
-    def __init__(self, eval_alignment_path=None, eval_corpus=None):
+    def __init__(self, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
         self.eval_alignment_path = eval_alignment_path
         self.gold_standard = None
         self.eval_corpus = eval_corpus
+        self.name = name if name is not None else type(self).__name__
+        self.save_path = save_path
+        if save_path is not None:
+            self.save_path = self.save_path if self.save_path.endswith("/") else self.save_path + "/"
+
         if self.eval_alignment_path is not None:
             self.gold_standard = read_naacl_alignments(self.eval_alignment_path)
 
@@ -74,20 +79,20 @@ class Model:
         self.source_counts = defaultdict(float)  # Count of words in the source language
         self.translation_probs = defaultdict(lambda: defaultdict(float))
 
+        # Save training metrics
+        self.aers = []
+        self.likelihoods = []
+
     def save(self, path):
         with open(path, "wb") as file:
-            self.translation_probs = dict(self.translation_probs)  # You can't pickle lambda functions
+            # You can't pickle lambda functions
+            self.translation_probs = {key: dict(value) for key, value in self.translation_probs.items()}
             pickle.dump(self, file)
 
     @staticmethod
     def load(path):
         with open(path, "rb") as file:
             model = pickle.load(file)
-
-            # Re-instate the defaultdict
-            loaded_translation_probs = model.translation_probs
-            model.translation_probs = defaultdict(float)
-            model.translation_probs.update(loaded_translation_probs)
             return model
 
     def init_translation_probabilities(self, mode, data, given_probs):
@@ -110,8 +115,6 @@ class Model:
         return translation_probs
 
     def train(self, data: ParallelCorpus, epochs=10, initialization="uniform", verbosity=1, **kwargs):
-        # TODO: Save model every iteration
-        # TODO: Write log-likelihood, elbo, aer per iteration into file (or at least console)
         log_likelihoods = defaultdict(float)
         num_sentences = len(data)
         print_interval = int(num_sentences / 10000)
@@ -126,9 +129,11 @@ class Model:
             if verbosity > 0:
                 print("\nStarting epoch #{}...".format(epoch+1))
 
-            log_likelihoods[epoch] = self.expectation_step(
+                log_likelihood = self.expectation_step(
                 data, epoch, print_interval=print_interval, verbosity=verbosity
             )
+            log_likelihoods[epoch] = log_likelihood
+            self.likelihoods.append(log_likelihood)
             self.maximization_step()
 
             end = time.time()
@@ -143,7 +148,14 @@ class Model:
                 )
 
             if self.eval_corpus is not None:
-                self.evaluate(verbosity=verbosity)
+                aer = self.evaluate(verbosity=verbosity)
+                self.aers.append(aer)
+
+            # Save model every iteration if path is given
+            if self.save_path is not None:
+                self.save("{}{}_iter{}.pkl".format(self.save_path, self.name, epoch+1))
+
+        self.plot_training()
 
     @staticmethod
     def add_null_token(sentence):
@@ -212,13 +224,28 @@ class Model:
 
         return aer
 
+    @property
+    def metrics(self):
+        return {"AER": self.aers, "Log-likelihood": self.likelihoods}
+
+    def plot_training(self):
+        for metric_name, data in self.metrics.items():
+            plt.figure()
+            plt.plot(range(1, len(data)+1), data)
+            plt.xlabel("Iteration")
+            plt.xticks(range(1, len(data)+1))
+            plt.ylabel(metric_name)
+            plt.savefig("{}{}_{}.png".format(self.save_path, self.name.lower(), metric_name.lower()))
+
 
 class Model1(Model):
     """
     Class for IBM model 1.
     """
-    def __init__(self, epsilon, eval_alignment_path=None, eval_corpus=None):
-        super().__init__(eval_alignment_path, eval_corpus)
+    def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+        super().__init__(
+            name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus, save_path=save_path
+        )
         self.epsilon = epsilon  # Normalization constant
 
     def reset_counts(self):
@@ -280,10 +307,15 @@ class VariationalModel1(Model1):
     """
     IBM model 1 using a variational Bayes approach.
     """
-    def __init__(self, alpha, epsilon, eval_alignment_path=None, eval_corpus=None):
-        super().__init__(epsilon, eval_alignment_path, eval_corpus)
+    def __init__(self, alpha, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+        super().__init__(
+            epsilon=epsilon, name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus,
+            save_path=save_path
+        )
         self.alpha = alpha  # Dirichlet prior belief
         self.lambdas = defaultdict(lambda: defaultdict(lambda: self.alpha))  # lambda_f|e
+
+        self.elbos = []  # Record ELBO per epoch
 
     def reset_counts(self):
         pass
@@ -352,6 +384,7 @@ class VariationalModel1(Model1):
             log_likelihood += sentence_log_likelihood
 
         elbo = self.elbo(log_likelihood)
+        self.elbos.append(elbo)
 
         if verbosity > 0:
             print("\nELBO for epoch #{} is {:.4f}".format(epoch+1, elbo))
@@ -390,18 +423,28 @@ class VariationalModel1(Model1):
             kl_divergence = theta_sum + loggamma(alpha_sum) - loggamma(lambda_sum)
             divergence_sum += kl_divergence
 
-        print("KL divergence is {:.4f}".format(divergence_sum.real))
-
         return log_likelihood - divergence_sum.real
+
+    @property
+    def metrics(self):
+        return {"AER": self.aers, "Log-likelihood": self.likelihoods, "ELBO": self.elbos}
+
+    def save(self, path):
+        with open(path, "wb") as file:
+            # You can't pickle lambda functions
+            self.translation_probs = {key: dict(value) for key, value in self.translation_probs.items()}
+            self.lambdas = {key: dict(value) for key, value in self.lambdas.items()}
+            pickle.dump(self, file)
 
 
 class Model2(Model1):
     """
     Class for IBM model 2.
     """
-    def __init__(self, epsilon, eval_alignment_path=None, eval_corpus=None):
+    def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
         super().__init__(
-            epsilon=epsilon, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus
+            epsilon=epsilon, name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus,
+            save_path=save_path
         )
         self.alignment_counts = defaultdict(float)  # c(j|i, m, l)
         self.aligned_counts = defaultdict(float)  # c(i, l, m)
@@ -492,14 +535,18 @@ if __name__ == "__main__":
     #print(model1.translation_probs)
     # model1 = Model1.load("./model_iter10_eps01_uniform")
     #
-    # model2 = Model2(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    # model2.train(corpus, epochs=10, initialization="continue", given_probs=model1.translation_probs)
-    # model2.save("./model2_iter10_eps01_continue")
-
-    varmodel1 = VariationalModel1(
-        alpha=0.1, epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    model2 = Model2(
+        name="model2", save_path="./models/",
+        epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
     )
-    varmodel1.train(corpus, epochs=10, initialization="random")
+    model2.train(corpus, epochs=3, initialization="uniform")
+    #model2.train(corpus, epochs=10, initialization="continue", given_probs=model1.translation_probs)
+
+    # varmodel1 = VariationalModel1(
+    #     name="varbayes", save_path="./models/",
+    #     alpha=0.1, epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # varmodel1.train(corpus, epochs=3, initialization="random")
 
     # # Evaluate
     # print("Evaluating model 1...")
