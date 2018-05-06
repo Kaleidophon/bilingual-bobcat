@@ -5,6 +5,7 @@ Main module describing the IBM model 1 and 2 logic.
 # STD
 import abc
 from collections import defaultdict
+import codecs
 import time
 from itertools import product
 import pickle
@@ -13,15 +14,12 @@ import os
 
 # EXT
 import numpy as np
-from scipy.special import digamma, gamma, loggamma
+from scipy.special import digamma, loggamma
 import matplotlib.pyplot as plt
 
 # PROJECT
 from aer import read_naacl_alignments, AERSufficientStatistics
 from corpus import ParallelCorpus
-
-# TODO
-# - Jump distribution reparameterization
 
 
 class AlignmentProbDict:
@@ -37,7 +35,8 @@ class AlignmentProbDict:
             return self.core[item]
         else:
             _, length_target, _, _ = item
-            self.core[item] = 1 / (length_target + 1)  # Initialize alignment probability uniformly
+            # Initialize alignment probability uniformly based on the target sentence length
+            self.core[item] = 1 / (length_target + 1)
             return self.core[item]
 
     def __setitem__(self, key, value):
@@ -64,26 +63,46 @@ class Model:
     Super class defining shared functions and variables for IBM models 1 and 2.
     """
     def __init__(self, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+        """
+        Create a model where most parameters are optional. Evaluation will only be conducted if eval_alignment_path and
+        eval_corpus are given, results and model files will only be saved if save_path is given.
+
+        :param name: Give a special name to the model to make it easier to find model / result files later.
+        :type name: str or None
+        :param eval_alignment_path: Path to file with test alignments.
+        :type eval_alignment_path: str or None
+        :param eval_corpus: Corpus with test set sentences.
+        :type eval_corpus: ParallelCorpus or None
+        :param save_path: Directory to which models, plots and results are being saved to.
+        :type save_path: str or None
+        """
         self.eval_alignment_path = eval_alignment_path
         self.gold_standard = None
         self.eval_corpus = eval_corpus
         self.name = name if name is not None else type(self).__name__
         self.save_path = save_path
+
+        # Make sure that there is no ambiguity for the path
         if save_path is not None:
             self.save_path = self.save_path if self.save_path.endswith("/") else self.save_path + "/"
 
+        # Load goal standard if given
         if self.eval_alignment_path is not None:
             self.gold_standard = read_naacl_alignments(self.eval_alignment_path)
 
+        # Initiate counts
         self.cooc_counts = defaultdict(float)  # p(e_l, f_k): Co-occurrences between source and target language words
         self.source_counts = defaultdict(float)  # Count of words in the source language
-        self.translation_probs = defaultdict(lambda: defaultdict(float))
+        self.translation_probs = None  # Already create attribute but initialize when training starts
 
         # Save training metrics
         self.aers = []
         self.likelihoods = []
 
     def save(self, path):
+        """
+        Save model to path.
+        """
         with open(path, "wb") as file:
             # You can't pickle lambda functions
             self.translation_probs = {key: dict(value) for key, value in self.translation_probs.items()}
@@ -91,11 +110,19 @@ class Model:
 
     @staticmethod
     def load(path):
+        """
+        Load model from path.
+        """
         with open(path, "rb") as file:
             model = pickle.load(file)
             return model
 
-    def init_translation_probabilities(self, mode, data, given_probs):
+    @staticmethod
+    def init_translation_probabilities(mode, data, given_probs):
+        """
+        Initialize translation probabilities uniformly, randomly or with probabilities from another, already trained
+        model.
+        """
         assert mode in ("uniform", "random", "continue"), "Invalid initialization mode {}".format(mode)
         translation_probs = defaultdict(lambda: defaultdict(float))
 
@@ -129,16 +156,21 @@ class Model:
             if verbosity > 0:
                 print("\nStarting epoch #{}...".format(epoch+1))
 
-                log_likelihood = self.expectation_step(
+            # E-step
+            log_likelihood = self.expectation_step(
                 data, epoch, print_interval=print_interval, verbosity=verbosity
             )
             log_likelihoods[epoch] = log_likelihood
             self.likelihoods.append(log_likelihood)
+
+            # M-step
             self.maximization_step()
 
+            # Calculate duration
             end = time.time()
             duration = end - start
             m, s = divmod(duration, 60)
+
             if verbosity > 0:
                 print(
                     "\rLog-likelihood for epoch #{}: {:.4f}\nEpoch #{} took {} minute(s) and {:.2f} second(s).\n".format(
@@ -147,6 +179,7 @@ class Model:
                     end="", flush=True
                 )
 
+            # Eval if test set is given
             if self.eval_corpus is not None:
                 aer = self.evaluate(verbosity=verbosity)
                 self.aers.append(aer)
@@ -155,7 +188,9 @@ class Model:
             if self.save_path is not None:
                 self.save("{}{}_iter{}.pkl".format(self.save_path, self.name, epoch+1))
 
-        self.plot_training()
+        # After training, save all plots and numbers if save_path is given
+        if self.save_path is not None:
+            self.plot_training()
 
     @staticmethod
     def add_null_token(sentence):
@@ -163,6 +198,9 @@ class Model:
 
     @abc.abstractmethod
     def reset_counts(self):
+        """
+        Reset model counts after every iteration.
+        """
         pass
 
     @abc.abstractmethod
@@ -174,6 +212,12 @@ class Model:
         pass
 
     def evaluate(self, eval_alignment_path=None, eval_corpus=None, result_path=None, verbosity=1):
+        """
+        Evaluate the model. If eval_alignment_path and eval_corpus are None, the values given during the models
+        initialization are given, i.e. you can test on new data if you name the arguments here explicitly. This
+        is done because during training this function is called on the validation set, but of course you want to
+        evaluate everything later on the actual test set.
+        """
         # Overwrite evaluation data if necessary
         # (Helpful e.g. when you load a model and want to evaluate it on some given data)
         if eval_alignment_path is not None:
@@ -229,13 +273,21 @@ class Model:
         return {"AER": self.aers, "Log-likelihood": self.likelihoods}
 
     def plot_training(self):
-        for metric_name, data in self.metrics.items():
-            plt.figure()
-            plt.plot(range(1, len(data)+1), data)
-            plt.xlabel("Iteration")
-            plt.xticks(range(1, len(data)+1))
-            plt.ylabel(metric_name)
-            plt.savefig("{}{}_{}.png".format(self.save_path, self.name.lower(), metric_name.lower()))
+        """
+        Create plots and write raw number into a results file.
+        """
+        with codecs.open("{}{}_results.txt".format(self.save_path, self.name.lower()), "wb", "utf-8") as result_file:
+            for metric_name, data in self.metrics.items():
+                # Plot
+                plt.figure()
+                plt.plot(range(1, len(data)+1), data)
+                plt.xlabel("Iteration")
+                plt.xticks(range(1, len(data)+1))
+                plt.ylabel(metric_name)
+                plt.savefig("{}{}_{}.png".format(self.save_path, self.name.lower(), metric_name.lower()))
+
+                # File
+                result_file.write("{}\t{}\n".format(metric_name, " ".join(map(str, data))))
 
 
 class Model1(Model):
@@ -243,6 +295,9 @@ class Model1(Model):
     Class for IBM model 1.
     """
     def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+        """
+        See model class.
+        """
         super().__init__(
             name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus, save_path=save_path
         )
@@ -295,7 +350,6 @@ class Model1(Model):
     def maximization_step(self):
         # M-Step
         # Estimate probabilities
-
         for source_type in self.translation_probs.keys():
             for target_type in self.translation_probs[source_type].keys():
                 pair = (source_type, target_type)
@@ -310,6 +364,12 @@ class VariationalModel1(Model1):
     IBM model 1 using a variational Bayes approach.
     """
     def __init__(self, alpha, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+        """
+        For other parameters see Model class.
+
+        :param alpha: Prior belief about sparseness of translation probabilities.
+        :type alpha: float
+        """
         super().__init__(
             epsilon=epsilon, name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus,
             save_path=save_path
@@ -338,14 +398,9 @@ class VariationalModel1(Model1):
 
             source_norm = digamma(sum(self.lambdas[source_type].values()))
             for target_type in self.translation_probs[source_type].keys():
-                try:
-                    self.translation_probs[source_type][target_type] = np.exp(
-                        digamma(self.lambdas[source_type][target_type]) - source_norm
-                    )
-                except TypeError:
-                    print(source_type, target_type)
-                    print(self.lambdas[(source_type, target_type)])
-                    print(sum(self.lambdas[source_type].values()))
+                self.translation_probs[source_type][target_type] = np.exp(
+                    digamma(self.lambdas[source_type][target_type]) - source_norm
+                )
 
         # Reset lambdas here
         self.lambdas = defaultdict(lambda: defaultdict(lambda: self.alpha))  # lambda_f|e
@@ -443,7 +498,10 @@ class Model2(Model1):
     """
     Class for IBM model 2.
     """
-    def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None, simple_jumps=False):
+    def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+        """
+        See Model class.
+        """
         super().__init__(
             epsilon=epsilon, name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus,
             save_path=save_path
@@ -451,7 +509,6 @@ class Model2(Model1):
         self.alignment_counts = defaultdict(float)  # c(j|i, m, l)
         self.aligned_counts = defaultdict(float)  # c(i, l, m)
         self.alignment_probs = AlignmentProbDict()
-        self.simple_jumps = simple_jumps
 
     def reset_counts(self):
         super().reset_counts()
@@ -483,31 +540,21 @@ class Model2(Model1):
                     (length_source, length_target, source_pos, target_pos)
                 ]
 
-            if self.simple_jumps:
-                jump_norms = [self.jump_norm(pos, length_source, length_target) for pos in range(length_target)]
-
             # Collect counts
             for source_pos, source_token in enumerate(source_sentence):
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
 
                 for target_pos, target_token in enumerate(target_sentence):
                     pair = (source_token, target_token)
-
-                    if self.simple_jumps:
-                        alignment_prob = self.jump_func(source_pos, target_pos, length_source, length_target) / jump_norms[target_pos]
-                        self.alignment_probs[(length_source, length_target, source_pos, target_pos)] = alignment_prob
-                        #print(alignment_prob)
-                    else:
-                        alignment_prob = self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
-
+                    alignment_prob = self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
                     delta = self.translation_probs[source_token][target_token] * alignment_prob / word_norms[source_token]
+
+                    # Update counts
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
                     source_token_probs += self.translation_probs[source_token][target_token] * alignment_prob
-
-                    if not self.simple_jumps:
-                        self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
-                        self.aligned_counts[(length_source, length_target, source_pos)] += delta
+                    self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
+                    self.aligned_counts[(length_source, length_target, source_pos)] += delta
 
                 sentence_log_likelihood += np.log(source_token_probs)
 
@@ -522,21 +569,15 @@ class Model2(Model1):
         super().maximization_step()
 
         # Update alignment probabilities
-        if not self.simple_jumps:
-            for alignment_key in self.alignment_probs.keys():
-                length_source, length_target, source_position, _ = alignment_key
-                aligned_key = (length_source, length_target, source_position)
-                self.alignment_probs[alignment_key] = self.alignment_counts[alignment_key] / self.aligned_counts[aligned_key]
-
-    @staticmethod
-    def jump_func(source_pos, target_pos, source_length, target_length):
-        return np.abs(np.floor(source_pos - (target_pos * source_length / target_length)))
-
-    def jump_norm(self, target_pos, source_length, target_length):
-        return np.sum([self.jump_func(pos, target_pos, source_length, target_length) for pos in range(source_length)])
+        for alignment_key in self.alignment_probs.keys():
+            length_source, length_target, source_position, _ = alignment_key
+            aligned_key = (length_source, length_target, source_position)
+            self.alignment_probs[alignment_key] = self.alignment_counts[alignment_key] / self.aligned_counts[aligned_key]
 
 
 if __name__ == "__main__":
+    # PREPARATION
+    # Use valiation and training set for training (doesn't matter in our case)
     corpus = ParallelCorpus(
         source_path=["./data/training/hansards.36.2.e", "./data/validation/dev.e"],
         target_path=["./data/training/hansards.36.2.f", "./data/validation/dev.f"]
@@ -549,36 +590,65 @@ if __name__ == "__main__":
     )
     test_alignments = "./data/testing/answers/test.wa.nonullalign"
 
-    # model1 = Model1(
-    #     name="model1", save_path="./models/",
-    #     epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    # )
-    # model1.train(corpus, epochs=2, initialization="random")
-
-    # model1 = Model1.load("./model_iter10_eps01_uniform")
-    #
-    model2 = Model2(
-       name="model2", save_path="./models/", simple_jumps=True,
-       epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    model1 = Model1(
+        name="model1", save_path="./models/",
+        epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
     )
-    model2.train(corpus, epochs=3, initialization="uniform")
-    #model2.train(corpus, epochs=10, initialization="continue", given_probs=model1.translation_probs)
+    model1.train(corpus, epochs=1, initialization="random")
 
-    # varmodel1 = VariationalModel1(
-    #     name="varbayes", save_path="./models/",
-    #     alpha=0.1, epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    # )
-    # varmodel1.train(corpus, epochs=3, initialization="random")
+    # TRAINING
+    # Train the following nine models
+    EPOCHS = 10
+    EPSILON = 0.1
 
-    # # Evaluate
-    # print("Evaluating model 1...")
-    # model1 = Model1.load("./model_iter10_eps01_uniform")
-    # model1.evaluate(
-    #     eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
-    # )
-    #
-    # print("Evaluating model 2...")
-    # model2 = Model2.load("./model2_iter10_eps01_continue")
-    # model2.evaluate(
-    #     eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm2.mle.naacl"
-    # )
+    # 1.) A simple version of the IBM model 1
+    simple_model1 = Model1(
+        name="simple_model1", save_path="./models/", epsilon=0.1,
+        eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    )
+    simple_model1.train(corpus, epochs=EPOCHS, initialization="random")
+
+    # 2.-4.) Variational Bayes model with different alpha values
+    for alpha in [0.01, 0.1, 1]:
+        vb_model = VariationalModel1(
+            name="vb_alpha_{}".format(str(alpha)), save_path="./models/", eval_corpus=eval_corpus,
+            alpha=alpha, epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign"
+        )
+        vb_model.train(corpus, epochs=EPOCHS, initialization="random")
+
+    # 5.) IBM Model 2 with uniform init
+    uniform_model2 = Model2(
+       name="uniform_model2", save_path="./models/",
+       epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    )
+    uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
+
+    # 6.-8.) IBM Model 2 with random init, three times
+    for run in range(3):
+        random_model2 = Model2(
+            name="random_model2_run{}".format(run + 1), save_path="./models/",
+            epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+        )
+        random_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
+
+    # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
+    # TODO: Load best model here
+    raise NotImplementedError
+    best_model1 = Model1.load("")
+    continue_model2 = Model2(
+        name="continue_model2".format(run + 1), save_path="./models/",
+        epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    )
+    continuemodel2.train(corpus, epochs=EPOCHS, initialization="continue", given_probs=best_model1.translation_probs)
+
+    # EVALUATION
+    # Evaluate the whole spiel
+    # TODO: Add paths to all the models that are being evaluated
+    model_paths = {}  # Dict model path -> model class
+    models = [model_class.load(model_path) for model_path, model_class in model_paths.items()]
+
+    for model in models:
+        print("Evaluating {}...".format(model.name))
+        model.evaluate(
+            eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
+        )
