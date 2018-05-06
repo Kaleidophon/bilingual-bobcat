@@ -443,7 +443,7 @@ class Model2(Model1):
     """
     Class for IBM model 2.
     """
-    def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None):
+    def __init__(self, epsilon, name=None, eval_alignment_path=None, eval_corpus=None, save_path=None, simple_jumps=False):
         super().__init__(
             epsilon=epsilon, name=name, eval_alignment_path=eval_alignment_path, eval_corpus=eval_corpus,
             save_path=save_path
@@ -451,6 +451,7 @@ class Model2(Model1):
         self.alignment_counts = defaultdict(float)  # c(j|i, m, l)
         self.aligned_counts = defaultdict(float)  # c(i, l, m)
         self.alignment_probs = AlignmentProbDict()
+        self.simple_jumps = simple_jumps
 
     def reset_counts(self):
         super().reset_counts()
@@ -482,22 +483,31 @@ class Model2(Model1):
                     (length_source, length_target, source_pos, target_pos)
                 ]
 
+            if self.simple_jumps:
+                jump_norms = [self.jump_norm(pos, length_source, length_target) for pos in range(length_target)]
+
             # Collect counts
             for source_pos, source_token in enumerate(source_sentence):
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
+
                 for target_pos, target_token in enumerate(target_sentence):
                     pair = (source_token, target_token)
-                    delta = self.translation_probs[source_token][target_token] * self.alignment_probs[
-                        (length_source, length_target, source_pos, target_pos)
-                    ] / word_norms[source_token]
+
+                    if self.simple_jumps:
+                        alignment_prob = self.jump_func(source_pos, target_pos, length_source, length_target) / jump_norms[target_pos]
+                        self.alignment_probs[(length_source, length_target, source_pos, target_pos)] = alignment_prob
+                        #print(alignment_prob)
+                    else:
+                        alignment_prob = self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
+
+                    delta = self.translation_probs[source_token][target_token] * alignment_prob / word_norms[source_token]
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
-                    source_token_probs += self.translation_probs[source_token][target_token] * self.alignment_probs[
-                        (length_source, length_target, source_pos, target_pos)
-                    ]
+                    source_token_probs += self.translation_probs[source_token][target_token] * alignment_prob
 
-                    self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
-                    self.aligned_counts[(length_source, length_target, source_pos)] += delta
+                    if not self.simple_jumps:
+                        self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
+                        self.aligned_counts[(length_source, length_target, source_pos)] += delta
 
                 sentence_log_likelihood += np.log(source_token_probs)
 
@@ -512,10 +522,18 @@ class Model2(Model1):
         super().maximization_step()
 
         # Update alignment probabilities
-        for alignment_key in self.alignment_probs.keys():
-            length_source, length_target, source_position, _ = alignment_key
-            aligned_key = (length_source, length_target, source_position)
-            self.alignment_probs[alignment_key] = self.alignment_counts[alignment_key] / self.aligned_counts[aligned_key]
+        if not self.simple_jumps:
+            for alignment_key in self.alignment_probs.keys():
+                length_source, length_target, source_position, _ = alignment_key
+                aligned_key = (length_source, length_target, source_position)
+                self.alignment_probs[alignment_key] = self.alignment_counts[alignment_key] / self.aligned_counts[aligned_key]
+
+    @staticmethod
+    def jump_func(source_pos, target_pos, source_length, target_length):
+        return np.abs(np.floor(source_pos - (target_pos * source_length / target_length)))
+
+    def jump_norm(self, target_pos, source_length, target_length):
+        return np.sum([self.jump_func(pos, target_pos, source_length, target_length) for pos in range(source_length)])
 
 
 if __name__ == "__main__":
@@ -540,10 +558,10 @@ if __name__ == "__main__":
     # model1 = Model1.load("./model_iter10_eps01_uniform")
     #
     model2 = Model2(
-       name="model2", save_path="./models/",
+       name="model2", save_path="./models/", simple_jumps=True,
        epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
     )
-    model2.train(corpus, epochs=1, initialization="uniform")
+    model2.train(corpus, epochs=3, initialization="uniform")
     #model2.train(corpus, epochs=10, initialization="continue", given_probs=model1.translation_probs)
 
     # varmodel1 = VariationalModel1(
