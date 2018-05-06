@@ -149,6 +149,9 @@ class Model:
             mode=initialization, data=data, given_probs=kwargs.get("given_probs", None)
         )
 
+        if verbosity > 0:
+            print("Training {}...".format(self.name))
+
         for epoch in range(epochs):
             start = time.time()
             self.reset_counts()
@@ -332,7 +335,7 @@ class Model1(Model):
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
                 for target_token in target_sentence:
                     pair = (source_token, target_token)
-                    delta = np.exp(np.log(self.translation_probs[source_token][target_token]) - np.log(word_norms[source_token]))
+                    delta = self.translation_probs[source_token][target_token] / (word_norms[source_token])
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
 
@@ -577,7 +580,7 @@ class Model2(Model1):
 
 if __name__ == "__main__":
     # PREPARATION
-    # Use valiation and training set for training (doesn't matter in our case)
+    # Use validation and training set for training (doesn't matter in our case)
     corpus = ParallelCorpus(
         source_path=["./data/training/hansards.36.2.e", "./data/validation/dev.e"],
         target_path=["./data/training/hansards.36.2.f", "./data/validation/dev.f"]
@@ -589,12 +592,6 @@ if __name__ == "__main__":
         source_path="./data/testing/test/test.e", target_path="./data/testing/test/test.f"
     )
     test_alignments = "./data/testing/answers/test.wa.nonullalign"
-
-    model1 = Model1(
-        name="model1", save_path="./models/",
-        epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    model1.train(corpus, epochs=1, initialization="random")
 
     # TRAINING
     # Train the following nine models
