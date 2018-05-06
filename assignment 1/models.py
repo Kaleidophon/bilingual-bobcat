@@ -277,7 +277,7 @@ class Model1(Model):
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
                 for target_token in target_sentence:
                     pair = (source_token, target_token)
-                    delta = self.translation_probs[source_token][target_token] / word_norms[source_token]
+                    delta = np.exp(np.log(self.translation_probs[source_token][target_token]) - np.log(word_norms[source_token]))
                     self.cooc_counts[pair] += delta
                     self.source_counts[source_token] += delta
 
@@ -295,12 +295,14 @@ class Model1(Model):
     def maximization_step(self):
         # M-Step
         # Estimate probabilities
-        for (source_type, target_type) in self.translation_probs.keys():
-            pair = (source_type, target_type)
-            try:
-                self.translation_probs[pair] = self.cooc_counts[pair] / self.source_counts[source_type]
-            except ZeroDivisionError:
-                self.translation_probs[pair] = 0  # TODO: This "fix" is wrong
+
+        for source_type in self.translation_probs.keys():
+            for target_type in self.translation_probs[source_type].keys():
+                pair = (source_type, target_type)
+                try:
+                    self.translation_probs[source_type][target_type] = self.cooc_counts[pair] / self.source_counts[source_type]
+                except ZeroDivisionError:
+                    self.translation_probs[source_type][target_type] = 1
 
 
 class VariationalModel1(Model1):
@@ -529,17 +531,19 @@ if __name__ == "__main__":
     )
     test_alignments = "./data/testing/answers/test.wa.nonullalign"
 
-    #model1 = Model1(epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus)
-    #model1.train(corpus, epochs=10, initialization="random")
-    #model1.save("./model_iter10_eps01_uniform")
-    #print(model1.translation_probs)
+    # model1 = Model1(
+    #     name="model1", save_path="./models/",
+    #     epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # model1.train(corpus, epochs=2, initialization="random")
+
     # model1 = Model1.load("./model_iter10_eps01_uniform")
     #
     model2 = Model2(
-        name="model2", save_path="./models/",
-        epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+       name="model2", save_path="./models/",
+       epsilon=0.1, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
     )
-    model2.train(corpus, epochs=3, initialization="uniform")
+    model2.train(corpus, epochs=1, initialization="uniform")
     #model2.train(corpus, epochs=10, initialization="continue", given_probs=model1.translation_probs)
 
     # varmodel1 = VariationalModel1(
