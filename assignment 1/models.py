@@ -34,9 +34,9 @@ class AlignmentProbDict:
         if item in self.core:
             return self.core[item]
         else:
-            _, length_target, _, _ = item
-            # Initialize alignment probability uniformly based on the target sentence length
-            self.core[item] = 1 / (length_target + 1)
+            _, length_source, _, _ = item
+            # Initialize alignment probability uniformly based on the source sentence length
+            self.core[item] = 1 / (length_source + 1)
             return self.core[item]
 
     def __setitem__(self, key, value):
@@ -90,14 +90,20 @@ class Model:
         if self.eval_alignment_path is not None:
             self.gold_standard = read_naacl_alignments(self.eval_alignment_path)
 
+        # Word indexing to save memory
+        self.word2index = defaultdict(lambda: len(self.word2index))
+
         # Initiate counts
-        self.cooc_counts = defaultdict(float)  # p(e_l, f_k): Co-occurrences between source and target language words
-        self.source_counts = defaultdict(float)  # Count of words in the source language
+        self.cooc_counts = defaultdict(float)  # p(e_l, f_k): Co-occurrences between target and source language words
+        self.target_counts = defaultdict(float)  # Count of words in the target language
         self.translation_probs = None  # Already create attribute but initialize when training starts
 
         # Save training metrics
         self.aers = []
         self.likelihoods = []
+
+    def convert2id(self, tokens):
+        return [self.word2index[token] for token in tokens]
 
     def save(self, path):
         """
@@ -106,6 +112,7 @@ class Model:
         with open(path, "wb") as file:
             # You can't pickle lambda functions
             self.translation_probs = {key: dict(value) for key, value in self.translation_probs.items()}
+            self.word2index = dict(self.word2index)
             pickle.dump(self, file)
 
     @staticmethod
@@ -121,6 +128,9 @@ class Model:
                 _translation_probs[k].update(v)
 
             model.translation_probs = _translation_probs
+            _word2index = defaultdict(lambda: len(_word2index))
+            _word2index.update(model.word2index)
+            model.word2_index = _word2index
             return model
 
     @staticmethod
@@ -134,7 +144,7 @@ class Model:
 
         # Initialize uniformly
         if mode == "uniform":
-            translation_probs = defaultdict(lambda: defaultdict(lambda: 1 / data.source_vocab_size))
+            translation_probs = defaultdict(lambda: defaultdict(lambda: 1 / data.target_vocab_size))
 
         # Initialize randomly
         elif mode == "random":
@@ -194,8 +204,8 @@ class Model:
                 self.aers.append(aer)
 
             # Save model every iteration if path is given
-            #if self.save_path is not None:
-            #    self.save("{}{}_iter{}.pkl".format(self.save_path, self.name, epoch+1))
+            if self.save_path is not None:
+                self.save("{}{}_iter{}.pkl".format(self.save_path, self.name, epoch+1))
 
         # After training, save all plots and numbers if save_path is given
         if self.save_path is not None:
@@ -246,14 +256,17 @@ class Model:
         # Determine the models alignments via the viterbi algorithm
         predictions = []
         for sentence_no, (source_sentence, target_sentence) in enumerate(self.eval_corpus):
+            # Convert words to ids
+            source_sentence = self.convert2id(source_sentence)
+            target_sentence = self.convert2id(target_sentence)
             links = set()
 
-            for target_pos, target_token in enumerate(target_sentence):
+            for source_pos, source_token in enumerate(source_sentence):
                 translation_probs = [
-                    self.translation_probs[source_token][target_token] for source_token in source_sentence
+                    self.translation_probs[target_token][source_token] for target_token in target_sentence
                 ]
-                source_pos = np.argmax(translation_probs)
-                links.add((source_pos+1, target_pos+1))
+                target_pos = np.argmax(translation_probs)
+                links.add((target_pos+1, source_pos+1))
 
             predictions.append(links)
 
@@ -314,13 +327,17 @@ class Model1(Model):
 
     def reset_counts(self):
         self.cooc_counts = defaultdict(float)
-        self.source_counts = defaultdict(float)
+        self.target_counts = defaultdict(float)
 
     def expectation_step(self, data, epoch, print_interval=1, verbosity=0):
         log_likelihood = 0
 
         for i, (source_sentence, target_sentence) in enumerate(data):
-            source_sentence = self.add_null_token(source_sentence)
+            # Convert words to ids to save memory
+            source_sentence = self.convert2id(source_sentence)
+            target_sentence = self.convert2id(target_sentence)
+
+            target_sentence = self.add_null_token(target_sentence)
             word_norms = defaultdict(float)
             sentence_log_likelihood = 0
 
@@ -333,25 +350,25 @@ class Model1(Model):
             # E-Step
             # Compute normalization
             # Implicitly uniform alignment probabilities as all alignments are considered equally
-            for (source_token, target_token) in product(source_sentence, target_sentence):
-                word_norms[source_token] += self.translation_probs[source_token][target_token]
+            for (target_token, source_token) in product(target_sentence, source_sentence):
+                word_norms[target_token] += self.translation_probs[target_token][source_token]
 
             # Collect counts
-            for source_token in source_sentence:
-                source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
-                for target_token in target_sentence:
-                    pair = (source_token, target_token)
-                    delta = self.translation_probs[source_token][target_token] / (word_norms[source_token])
+            for target_token in target_sentence:
+                target_token_probs = 0  # Sum of pi(f_j|e_i) over all i
+                for source_token in source_sentence:
+                    pair = (target_token, source_token)
+                    delta = self.translation_probs[target_token][source_token] / (word_norms[target_token])
                     self.cooc_counts[pair] += delta
-                    self.source_counts[source_token] += delta
+                    self.target_counts[target_token] += delta
 
                     # Accumulate (log-)likelihood for this sentence
-                    source_token_probs += self.translation_probs[source_token][target_token]
+                    target_token_probs += self.translation_probs[target_token][source_token]
 
-                sentence_log_likelihood += np.log(source_token_probs)
+                sentence_log_likelihood += np.log(target_token_probs)
 
             # Normalization of sentence log-likelihood by sentence lengths
-            sentence_log_likelihood += np.log(self.epsilon) - len(target_sentence) * np.log(len(source_sentence))
+            sentence_log_likelihood += np.log(self.epsilon) - len(source_sentence) * np.log(len(target_sentence))
             log_likelihood += sentence_log_likelihood
 
         return log_likelihood
@@ -359,13 +376,13 @@ class Model1(Model):
     def maximization_step(self):
         # M-Step
         # Estimate probabilities
-        for source_type in self.translation_probs.keys():
-            for target_type in self.translation_probs[source_type].keys():
-                pair = (source_type, target_type)
+        for target_type in self.translation_probs.keys():
+            for source_type in self.translation_probs[target_type].keys():
+                pair = (target_type, source_type)
                 try:
-                    self.translation_probs[source_type][target_type] = self.cooc_counts[pair] / self.source_counts[source_type]
+                    self.translation_probs[target_type][source_type] = self.cooc_counts[pair] / self.target_counts[target_type]
                 except ZeroDivisionError:
-                    self.translation_probs[source_type][target_type] = 1
+                    self.translation_probs[target_type][source_type] = 1
 
 
 class VariationalModel1(Model1):
@@ -397,7 +414,7 @@ class VariationalModel1(Model1):
         # E-Step
         # Update estimated translation probabilities
         number_types = len(self.translation_probs)
-        for i, source_type in enumerate(self.translation_probs.keys()):
+        for i, target_type in enumerate(self.translation_probs.keys()):
             if verbosity > 0:
                 print(
                     "\rUpating translation probs for type {}/{} ({:.2f} %)...".format(
@@ -405,10 +422,10 @@ class VariationalModel1(Model1):
                     ), end="", flush=True
                 )
 
-            source_norm = digamma(sum(self.lambdas[source_type].values()))
-            for target_type in self.translation_probs[source_type].keys():
-                self.translation_probs[source_type][target_type] = np.exp(
-                    digamma(self.lambdas[source_type][target_type]) - source_norm
+            target_norm = digamma(sum(self.lambdas[target_type].values()))
+            for source_type in self.translation_probs[target_type].keys():
+                self.translation_probs[target_type][source_type] = np.exp(
+                    digamma(self.lambdas[target_type][source_type]) - target_norm
                 )
 
         # Reset lambdas here
@@ -416,7 +433,7 @@ class VariationalModel1(Model1):
 
         # Accumulate counts
         for i, (source_sentence, target_sentence) in enumerate(data):
-            source_sentence = self.add_null_token(source_sentence)
+            target_sentence = self.add_null_token(target_sentence)
             word_norms = defaultdict(float)
             sentence_log_likelihood = 0
 
@@ -428,25 +445,25 @@ class VariationalModel1(Model1):
 
             # Compute normalization
             # Implicitly uniform alignment probabilities as all alignments are considered equally
-            for (source_token, target_token) in product(source_sentence, target_sentence):
-                word_norms[source_token] += self.translation_probs[source_token][target_token]
+            for (target_token, source_token) in product(target_sentence, source_sentence):
+                word_norms[target_token] += self.translation_probs[target_token][source_token]
 
             # Collect counts
-            for source_token in source_sentence:
-                source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
-                for target_token in target_sentence:
-                    delta = self.translation_probs[source_token][target_token] / word_norms[source_token]
+            for target_token in target_sentence:
+                target_token_probs = 0  # Sum of pi(f_j|e_i) over all i
+                for source_token in source_sentence:
+                    delta = self.translation_probs[target_token][source_token] / word_norms[target_token]
 
                     # Cheat a little here and already update lambdas
-                    self.lambdas[source_token][target_token] += delta
+                    self.lambdas[target_token][source_token] += delta
 
                     # Accumulate (log-)likelihood for this sentence
-                    source_token_probs += self.translation_probs[source_token][target_token]
+                    target_token_probs += self.translation_probs[target_token][source_token]
 
-                sentence_log_likelihood += np.log(source_token_probs)
+                sentence_log_likelihood += np.log(target_token_probs)
 
             # Normalization of sentence log-likelihood by sentence lengths
-            sentence_log_likelihood += np.log(self.epsilon) - len(target_sentence) * np.log(len(source_sentence))
+            sentence_log_likelihood += np.log(self.epsilon) - len(source_sentence) * np.log(len(target_sentence))
             log_likelihood += sentence_log_likelihood
 
         elbo = self.elbo(log_likelihood)
@@ -468,24 +485,24 @@ class VariationalModel1(Model1):
         """
         divergence_sum = 0
 
-        for source_type in self.translation_probs.keys():
-            source_norm = digamma(sum(self.lambdas[source_type].values()))
-            target_types = self.translation_probs[source_type].keys()
+        for target_type in self.translation_probs.keys():
+            target_norm = digamma(sum(self.lambdas[target_type].values()))
+            source_types = self.translation_probs[target_type].keys()
 
             theta_sum = 0  # Sum over all probabilities theta_f|e and other terms for all f in V_f
             alpha_sum = 0  # Sum over all alpha_f for all f in V_f
             lambda_sum = 0  # Sum over all lambda_f|e for all f in V_f
 
-            for target_type in target_types:
-                current_lambda = self.lambdas[source_type][target_type]
-                sufficient_statistic = digamma(current_lambda) - source_norm
+            for source_type in source_types:
+                current_lambda = self.lambdas[target_type][source_type]
+                sufficient_statistic = digamma(current_lambda) - target_norm
 
                 # Update sums (using constant alpha_f for all f in V_f)
                 theta_sum += sufficient_statistic * (self.alpha - current_lambda) + loggamma(current_lambda) - loggamma(self.alpha)
                 alpha_sum += self.alpha
                 lambda_sum += current_lambda
 
-            # We calculate the KL divergence for every source type and sum them together in the end
+            # We calculate the KL divergence for every target type and sum them together in the end
             kl_divergence = theta_sum + loggamma(alpha_sum) - loggamma(lambda_sum)
             divergence_sum += kl_divergence
 
@@ -528,11 +545,11 @@ class Model2(Model1):
         log_likelihood = 0
 
         for i, (source_sentence, target_sentence) in enumerate(data):
-            source_sentence = self.add_null_token(source_sentence)
+            target_sentence = self.add_null_token(target_sentence)
             word_norms = defaultdict(float)
             sentence_log_likelihood = 0
-            length_source = len(source_sentence)
             length_target = len(target_sentence)
+            length_source = len(source_sentence)
 
             if verbosity > 0 and (i + 1) % print_interval == 0:
                 print(
@@ -543,34 +560,34 @@ class Model2(Model1):
             # E-Step
             # Compute normalization
             # Implicitly uniform alignment probabilities as all alignments are considered equally
-            pos_and_tokens = product(enumerate(source_sentence), enumerate(target_sentence))
-            for (source_pos, source_token), (target_pos, target_token) in pos_and_tokens:
-                source_pos -= 1  # Because of NULL
-                word_norms[source_token] += self.translation_probs[source_token][target_token] * self.alignment_probs[
-                    (length_source, length_target, source_pos, target_pos)
+            pos_and_tokens = product(enumerate(target_sentence), enumerate(source_sentence))
+            for (target_pos, target_token), (source_pos, source_token) in pos_and_tokens:
+                target_pos -= 1  # Because of NULL
+                word_norms[target_token] += self.translation_probs[target_token][source_token] * self.alignment_probs[
+                    (length_target, length_source, target_pos, source_pos)
                 ]
 
             # Collect counts
-            for source_pos, source_token in enumerate(source_sentence):
-                source_pos -= 1  # Because of NULL
-                source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
+            for target_pos, target_token in enumerate(target_sentence):
+                target_pos -= 1  # Because of NULL
+                target_token_probs = 0  # Sum of pi(f_j|e_i) over all i
 
-                for target_pos, target_token in enumerate(target_sentence):
-                    pair = (source_token, target_token)
-                    alignment_prob = self.alignment_probs[(length_source, length_target, source_pos, target_pos)]
-                    delta = self.translation_probs[source_token][target_token] * alignment_prob / word_norms[source_token]
+                for source_pos, source_token in enumerate(source_sentence):
+                    pair = (target_token, source_token)
+                    alignment_prob = self.alignment_probs[(length_target, length_source, target_pos, source_pos)]
+                    delta = self.translation_probs[target_token][source_token] * alignment_prob / word_norms[target_token]
 
                     # Update counts
                     self.cooc_counts[pair] += delta
-                    self.source_counts[source_token] += delta
-                    source_token_probs += self.translation_probs[source_token][target_token] * alignment_prob
-                    self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
-                    self.aligned_counts[(length_source, length_target, target_pos)] += delta
+                    self.target_counts[target_token] += delta
+                    target_token_probs += self.translation_probs[target_token][source_token] * alignment_prob
+                    self.alignment_counts[(length_target, length_source, target_pos, source_pos)] += delta
+                    self.aligned_counts[(length_target, length_source, source_pos)] += delta
 
-                sentence_log_likelihood += np.log(source_token_probs)
+                sentence_log_likelihood += np.log(target_token_probs)
 
             # Normalization of sentence log-likelihood by sentence lengths
-            sentence_log_likelihood += np.log(self.epsilon) - len(target_sentence) * np.log(len(source_sentence))
+            sentence_log_likelihood += np.log(self.epsilon) - len(source_sentence) * np.log(len(target_sentence))
             log_likelihood += sentence_log_likelihood
 
         return log_likelihood
@@ -581,52 +598,23 @@ class Model2(Model1):
 
         # Update alignment probabilities
         for alignment_key in self.alignment_probs.keys():
-            length_source, length_target, source_position, _ = alignment_key
-            aligned_key = (length_source, length_target, source_position)
+            length_target, length_source, target_position, _ = alignment_key
+            aligned_key = (length_target, length_source, target_position)
             self.alignment_probs[alignment_key] = self.alignment_counts[alignment_key] / self.aligned_counts[aligned_key]
-
-    def save(self, path):
-        """
-        Save model to path.
-        """
-        n_bytes = 2 ** 31
-        max_bytes = 2 ** 31 - 1
-
-        self.translation_probs = {key: dict(value) for key, value in self.translation_probs.items()}
-        #data = bytearray(n_bytes)
-        bytes_out = pickle.dumps(self)
-        with open(path, "wb") as file:
-            for idx in range(0, n_bytes, max_bytes):
-                file.write(bytes_out[idx:idx + max_bytes])
-
-    @staticmethod
-    def load(path):
-        """
-        Load model from path.
-        """
-        with open(path, "rb") as file:
-            model = pickle.load(file)
-            # Convert back to defaultdict
-            _translation_probs = defaultdict(lambda: defaultdict(float))
-            for k, v in model.translation_probs.items():
-                _translation_probs[k].update(v)
-
-            model.translation_probs = _translation_probs
-            return model
 
 
 if __name__ == "__main__":
     # PREPARATION
     # Use validation and training set for training (doesn't matter in our case)
     corpus = ParallelCorpus(
-        source_path=["./data/training/hansards.36.2.e", "./data/validation/dev.e"],
-        target_path=["./data/training/hansards.36.2.f", "./data/validation/dev.f"]
+        target_path=["./data/training/hansards.36.2.e", "./data/validation/dev.e"],
+        source_path=["./data/training/hansards.36.2.f", "./data/validation/dev.f"]
     )
     eval_corpus = ParallelCorpus(
-        source_path="./data/validation/dev.e", target_path="./data/validation/dev.f"
+        target_path="./data/validation/dev.e", source_path="./data/validation/dev.f"
     )
     test_corpus = ParallelCorpus(
-        source_path="./data/testing/test/test.e", target_path="./data/testing/test/test.f"
+        target_path="./data/testing/test/test.e", source_path="./data/testing/test/test.f"
     )
     test_alignments = "./data/testing/answers/test.wa.nonullalign"
 
@@ -635,13 +623,13 @@ if __name__ == "__main__":
     EPOCHS = 10
     EPSILON = 0.1
 
-    # # 1.) A simple version of the IBM model 1
-    # simple_model1 = Model1(
-    #     name="simple_model1", save_path="./models/", epsilon=0.1,
-    #     eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    # )
-    # simple_model1.train(corpus, epochs=EPOCHS, initialization="uniform")
-    #
+    # 1.) A simple version of the IBM model 1
+    simple_model1 = Model1(
+        name="simple_model1", save_path="./models/", epsilon=0.1,
+        eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    )
+    simple_model1.train(corpus, epochs=EPOCHS, initialization="uniform")
+
     # 2.-4.) Variational Bayes model with different alpha values
     for alpha in [0.01, 0.1, 1]:
         vb_model = VariationalModel1(
@@ -649,33 +637,21 @@ if __name__ == "__main__":
             alpha=alpha, epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign"
         )
         vb_model.train(corpus, epochs=EPOCHS, initialization="uniform")
-    #
-    # # 5.) IBM Model 2 with uniform init
-    # uniform_model2 = Model2(
-    #    name="uniform_model2", save_path="./models/",
-    #    epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    # )
-    # uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
 
-    # # 6.-8.) IBM Model 2 with random init, three times
-    # for run in range(3):
-    #     random_model2 = Model2(
-    #         name="random_model2_run{}".format(run + 1), save_path="./models/",
-    #         epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    #     )
-    #     random_model2.train(corpus, epochs=EPOCHS, initialization="random")
+    # 5.) IBM Model 2 with uniform init
+    uniform_model2 = Model2(
+       name="uniform_model2", save_path="./models/",
+       epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    )
+    uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
 
-    # # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
-    # raise NotImplementedError
-    best_model1 = Model1.load("./models/vb_alpha_0.1_iter2.pkl")
-    continue_model2 = Model2(
-        name="continue_model2", save_path="./models/",
-        epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    continue_model2.train(corpus, epochs=EPOCHS, initialization="continue", given_probs=best_model1.translation_probs)
-    continue_model2.evaluate(
-        eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
-    )
+    # 6.-8.) IBM Model 2 with random init, three times
+    for run in range(3):
+        random_model2 = Model2(
+            name="random_model2_run{}".format(run + 1), save_path="./models/",
+            epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+        )
+        random_model2.train(corpus, epochs=EPOCHS, initialization="random")
 
     raise NotImplementedError
     # EVALUATION
@@ -695,9 +671,23 @@ if __name__ == "__main__":
         "./models/vb_alpha_1_iter3.pkl": VariationalModel1,
         "./models/vb_alpha_1_iter10.pkl": VariationalModel1
     }
+
     # Don't load all models at once, use generator
     for model in (model_class.load(model_path) for model_path, model_class in model_paths.items()):
         print("Evaluating {}...".format(model.name))
         model.evaluate(
             eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
         )
+
+    # # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
+    # raise NotImplementedError
+    best_model1 = Model1.load("./models/vb_alpha_0.1_iter2.pkl")
+    continue_model2 = Model2(
+        name="continue_model2", save_path="./models/",
+        epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    )
+    continue_model2.train(corpus, epochs=EPOCHS, initialization="continue",
+                          given_probs=best_model1.translation_probs)
+    continue_model2.evaluate(
+        eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
+    )

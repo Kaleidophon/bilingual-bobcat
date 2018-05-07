@@ -19,8 +19,8 @@ class ParallelCorpus:
         self.source_sentences = self.read_all(source_paths)
         self.target_sentences = self.read_all(target_paths)
         self.size = len(self.source_sentences)
-        self.source_vocab = set()
-        self._source_vocab_size = None
+        self.target_vocab = set()
+        self._target_vocab_size = None
 
     def read_all(self, paths):
         """
@@ -49,11 +49,11 @@ class ParallelCorpus:
         return zip(self.source_sentences, self.target_sentences)
 
     @property
-    def source_vocab_size(self):
-        if self._source_vocab_size is None:
-            self.source_vocab = {token for sentence in self.source_sentences for token in sentence}
-            self._source_vocab_size = len(self.source_vocab)
-        return self._source_vocab_size
+    def target_vocab_size(self):
+        if self._target_vocab_size is None:
+            self.target_vocab = {token for sentence in self.target_sentences for token in sentence}
+            self._target_vocab_size = len(self.target_vocab)
+        return self._target_vocab_size
 
     def __iter__(self):
         return (
