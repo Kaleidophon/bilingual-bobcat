@@ -115,6 +115,12 @@ class Model:
         """
         with open(path, "rb") as file:
             model = pickle.load(file)
+            # Convert back to defaultdict
+            _translation_probs = defaultdict(lambda: defaultdict(float))
+            for k, v in model.translation_probs.items():
+                _translation_probs[k].update(v)
+
+            model.translation_probs = _translation_probs
             return model
 
     @staticmethod
@@ -188,8 +194,8 @@ class Model:
                 self.aers.append(aer)
 
             # Save model every iteration if path is given
-            if self.save_path is not None:
-                self.save("{}{}_iter{}.pkl".format(self.save_path, self.name, epoch+1))
+            #if self.save_path is not None:
+            #    self.save("{}{}_iter{}.pkl".format(self.save_path, self.name, epoch+1))
 
         # After training, save all plots and numbers if save_path is given
         if self.save_path is not None:
@@ -267,7 +273,7 @@ class Model:
         aer = metric.aer()
 
         if verbosity > 0:
-            print("AER is {:.2f}.".format(aer))
+            print("AER is {:.4f}.".format(aer))
 
         return aer
 
@@ -483,7 +489,7 @@ class VariationalModel1(Model1):
             kl_divergence = theta_sum + loggamma(alpha_sum) - loggamma(lambda_sum)
             divergence_sum += kl_divergence
 
-        return log_likelihood - divergence_sum.real
+        return log_likelihood + divergence_sum.real
 
     @property
     def metrics(self):
@@ -539,12 +545,14 @@ class Model2(Model1):
             # Implicitly uniform alignment probabilities as all alignments are considered equally
             pos_and_tokens = product(enumerate(source_sentence), enumerate(target_sentence))
             for (source_pos, source_token), (target_pos, target_token) in pos_and_tokens:
+                source_pos -= 1  # Because of NULL
                 word_norms[source_token] += self.translation_probs[source_token][target_token] * self.alignment_probs[
                     (length_source, length_target, source_pos, target_pos)
                 ]
 
             # Collect counts
             for source_pos, source_token in enumerate(source_sentence):
+                source_pos -= 1  # Because of NULL
                 source_token_probs = 0  # Sum of pi(f_j|e_i) over all i
 
                 for target_pos, target_token in enumerate(target_sentence):
@@ -557,7 +565,7 @@ class Model2(Model1):
                     self.source_counts[source_token] += delta
                     source_token_probs += self.translation_probs[source_token][target_token] * alignment_prob
                     self.alignment_counts[(length_source, length_target, source_pos, target_pos)] += delta
-                    self.aligned_counts[(length_source, length_target, source_pos)] += delta
+                    self.aligned_counts[(length_source, length_target, target_pos)] += delta
 
                 sentence_log_likelihood += np.log(source_token_probs)
 
@@ -576,6 +584,35 @@ class Model2(Model1):
             length_source, length_target, source_position, _ = alignment_key
             aligned_key = (length_source, length_target, source_position)
             self.alignment_probs[alignment_key] = self.alignment_counts[alignment_key] / self.aligned_counts[aligned_key]
+
+    def save(self, path):
+        """
+        Save model to path.
+        """
+        n_bytes = 2 ** 31
+        max_bytes = 2 ** 31 - 1
+
+        self.translation_probs = {key: dict(value) for key, value in self.translation_probs.items()}
+        #data = bytearray(n_bytes)
+        bytes_out = pickle.dumps(self)
+        with open(path, "wb") as file:
+            for idx in range(0, n_bytes, max_bytes):
+                file.write(bytes_out[idx:idx + max_bytes])
+
+    @staticmethod
+    def load(path):
+        """
+        Load model from path.
+        """
+        with open(path, "rb") as file:
+            model = pickle.load(file)
+            # Convert back to defaultdict
+            _translation_probs = defaultdict(lambda: defaultdict(float))
+            for k, v in model.translation_probs.items():
+                _translation_probs[k].update(v)
+
+            model.translation_probs = _translation_probs
+            return model
 
 
 if __name__ == "__main__":
@@ -598,53 +635,68 @@ if __name__ == "__main__":
     EPOCHS = 10
     EPSILON = 0.1
 
-    # 1.) A simple version of the IBM model 1
-    simple_model1 = Model1(
-        name="simple_model1", save_path="./models/", epsilon=0.1,
-        eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    simple_model1.train(corpus, epochs=EPOCHS, initialization="random")
-
+    # # 1.) A simple version of the IBM model 1
+    # simple_model1 = Model1(
+    #     name="simple_model1", save_path="./models/", epsilon=0.1,
+    #     eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # simple_model1.train(corpus, epochs=EPOCHS, initialization="uniform")
+    #
     # 2.-4.) Variational Bayes model with different alpha values
     for alpha in [0.01, 0.1, 1]:
         vb_model = VariationalModel1(
             name="vb_alpha_{}".format(str(alpha)), save_path="./models/", eval_corpus=eval_corpus,
             alpha=alpha, epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign"
         )
-        vb_model.train(corpus, epochs=EPOCHS, initialization="random")
+        vb_model.train(corpus, epochs=EPOCHS, initialization="uniform")
+    #
+    # # 5.) IBM Model 2 with uniform init
+    # uniform_model2 = Model2(
+    #    name="uniform_model2", save_path="./models/",
+    #    epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
 
-    # 5.) IBM Model 2 with uniform init
-    uniform_model2 = Model2(
-       name="uniform_model2", save_path="./models/",
-       epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
+    # # 6.-8.) IBM Model 2 with random init, three times
+    # for run in range(3):
+    #     random_model2 = Model2(
+    #         name="random_model2_run{}".format(run + 1), save_path="./models/",
+    #         epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    #     )
+    #     random_model2.train(corpus, epochs=EPOCHS, initialization="random")
 
-    # 6.-8.) IBM Model 2 with random init, three times
-    for run in range(3):
-        random_model2 = Model2(
-            name="random_model2_run{}".format(run + 1), save_path="./models/",
-            epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-        )
-        random_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
-
-    # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
-    # TODO: Load best model here
-    raise NotImplementedError
-    best_model1 = Model1.load("")
+    # # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
+    # raise NotImplementedError
+    best_model1 = Model1.load("./models/vb_alpha_0.1_iter2.pkl")
     continue_model2 = Model2(
-        name="continue_model2".format(run + 1), save_path="./models/",
+        name="continue_model2", save_path="./models/",
         epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
     )
-    continuemodel2.train(corpus, epochs=EPOCHS, initialization="continue", given_probs=best_model1.translation_probs)
+    continue_model2.train(corpus, epochs=EPOCHS, initialization="continue", given_probs=best_model1.translation_probs)
+    continue_model2.evaluate(
+        eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
+    )
 
+    raise NotImplementedError
     # EVALUATION
     # Evaluate the whole spiel
     # TODO: Add paths to all the models that are being evaluated
-    model_paths = {}  # Dict model path -> model class
-    models = [model_class.load(model_path) for model_path, model_class in model_paths.items()]
-
-    for model in models:
+    # Dict model path -> model class
+    model_paths = {
+        "./models/random_model2_run1_iter10.pkl": Model2,
+        "./models/random_model2_run3_iter10.pkl": Model2,
+        "./models/simple_model1_iter10.pkl": Model1,
+        "./models/uniform_model2_iter9.pkl": Model2,
+        "./models/uniform_model2_iter10.pkl": Model2,
+        "./models/vb_alpha_0.1_iter2.pkl": VariationalModel1,
+        "./models/vb_alpha_0.01_iter2.pkl": VariationalModel1,
+        "./models/vb_alpha_0.1_iter10.pkl": VariationalModel1,
+        "./models/vb_alpha_0.01_iter10.pkl": VariationalModel1,
+        "./models/vb_alpha_1_iter3.pkl": VariationalModel1,
+        "./models/vb_alpha_1_iter10.pkl": VariationalModel1
+    }
+    # Don't load all models at once, use generator
+    for model in (model_class.load(model_path) for model_path, model_class in model_paths.items()):
         print("Evaluating {}...".format(model.name))
         model.evaluate(
             eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
