@@ -129,7 +129,8 @@ class Model:
                 _translation_probs[k].update(v)
 
             model.translation_probs = _translation_probs
-            _word2index = defaultdict(lambda: len(_word2index), model.word2index)
+            _word2index = defaultdict(lambda: len(model.word2index))
+            _word2index.update(model.word2index)
             model.word2index = _word2index
             return model
 
@@ -414,18 +415,19 @@ class VariationalModel1(Model1):
         # E-Step
         # Update estimated translation probabilities
         number_types = len(self.translation_probs)
-        for i, source_type in enumerate(self.translation_probs.keys()):
+        for i, target_type in enumerate(self.lambdas.keys()):
+            #if target_type == "NULL": continue
             if verbosity > 0:
                 print(
-                    "\rUpating translation probs for type {}/{} ({:.2f} %)...".format(
+                    "\rUpdating translation probs for type {}/{} ({:.2f} %)...".format(
                         i + 1, number_types, (i + 1) / number_types * 100
                     ), end="", flush=True
                 )
 
-            target_norm = digamma(sum(self.lambdas[source_type].values()))
-            for target_type in self.translation_probs[source_type].keys():
+            source_norm = digamma(sum(self.lambdas[target_type].values()))
+            for source_type in self.lambdas[target_type].keys():
                 self.translation_probs[source_type][target_type] = np.exp(
-                    digamma(self.lambdas[source_type][target_type]) - target_norm
+                    digamma(self.lambdas[target_type][source_type]) - source_norm
                 )
 
         # Reset lambdas here
@@ -458,7 +460,7 @@ class VariationalModel1(Model1):
                     delta = self.translation_probs[source_token][target_token] / word_norms[source_token]
 
                     # Cheat a little here and already update lambdas
-                    self.lambdas[source_token][target_token] += delta
+                    self.lambdas[target_token][source_token] += delta
 
                     # Accumulate (log-)likelihood for this sentence
                     token_probs += self.translation_probs[source_token][target_token]
@@ -489,7 +491,6 @@ class VariationalModel1(Model1):
         divergence_sum = 0
 
         for source_type in self.translation_probs.keys():
-            target_norm = digamma(sum(self.lambdas[source_type].values()))
             target_types = self.translation_probs[source_type].keys()
 
             theta_sum = 0  # Sum over all probabilities theta_f|e and other terms for all f in V_f
@@ -497,8 +498,8 @@ class VariationalModel1(Model1):
             lambda_sum = 0  # Sum over all lambda_f|e for all f in V_f
 
             for target_type in target_types:
-                current_lambda = self.lambdas[source_type][target_type]
-                sufficient_statistic = digamma(current_lambda) - target_norm
+                current_lambda = self.lambdas[target_type][source_type]
+                sufficient_statistic = np.log(self.translation_probs[source_type][target_type])
 
                 # Update sums (using constant alpha_f for all f in V_f)
                 theta_sum += sufficient_statistic * (self.alpha - current_lambda) + loggamma(current_lambda) - loggamma(self.alpha)
@@ -630,70 +631,65 @@ if __name__ == "__main__":
     EPOCHS = 10
     EPSILON = 0.1
 
-    # 1.) A simple version of the IBM model 1
-    simple_model1 = Model1(
-        name="simple_model1", save_path="./models/", epsilon=0.1,
-        eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    simple_model1.train(corpus, epochs=EPOCHS, initialization="uniform")
+    # # 1.) A simple version of the IBM model 1
+    # simple_model1 = Model1(
+    #     name="simple_model1", save_path="./models/", epsilon=0.1,
+    #     eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # simple_model1.train(corpus, epochs=EPOCHS, initialization="uniform")
 
-    # 2.-4.) Variational Bayes model with different alpha values
-    for alpha in [0.01, 0.1, 1]:
-        vb_model = VariationalModel1(
-            name="vb_alpha_{}".format(str(alpha)), save_path="./models/", eval_corpus=eval_corpus,
-            alpha=alpha, epsilon=EPSILON, eval_alignment_path= "./data/validation/dev.wa.nonullalign"
-        )
-        vb_model.train(corpus, epochs=EPOCHS, initialization="uniform")
+    # # 2.-4.) Variational Bayes model with different alpha values
+    # for alpha in [0.01, 0.1, 1]:
+    #     vb_model = VariationalModel1(
+    #         name="vb_alpha_{}".format(str(alpha)), save_path="./models/", eval_corpus=eval_corpus,
+    #         alpha=alpha, epsilon=EPSILON, eval_alignment_path= "./data/validation/dev.wa.nonullalign"
+    #     )
+    #     vb_model.train(corpus, epochs=EPOCHS, initialization="uniform")
+    #
+    # # 5.) IBM Model 2 with uniform init
+    # uniform_model2 = Model2(
+    #    name="uniform_model2", save_path="./models/",
+    #    epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
+    #
+    # # 6.-8.) IBM Model 2 with random init, three times
+    # for run in range(3):
+    #     random_model2 = Model2(
+    #         name="random_model2_run{}".format(run + 1), save_path="./models/",
+    #         epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    #     )
+    #     random_model2.train(corpus, epochs=EPOCHS, initialization="random")
 
-    # 5.) IBM Model 2 with uniform init
-    uniform_model2 = Model2(
-       name="uniform_model2", save_path="./models/",
-       epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    uniform_model2.train(corpus, epochs=EPOCHS, initialization="uniform")
-
-    # 6.-8.) IBM Model 2 with random init, three times
-    for run in range(3):
-        random_model2 = Model2(
-            name="random_model2_run{}".format(run + 1), save_path="./models/",
-            epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-        )
-        random_model2.train(corpus, epochs=EPOCHS, initialization="random")
-
-    raise NotImplementedError
     # EVALUATION
     # Evaluate the whole spiel
     # Dict model path -> model class
     model_paths = {
-        #"./models/random_model2_run1_iter10.pkl": Model2,
-        #"./models/random_model2_run3_iter10.pkl": Model2,
         "./models/simple_model1_iter10.pkl": Model1,
-        #"./models/uniform_model2_iter9.pkl": Model2,
-        #"./models/uniform_model2_iter10.pkl": Model2,
-        #"./models/vb_alpha_0.1_iter2.pkl": VariationalModel1,
-        #"./models/vb_alpha_0.01_iter2.pkl": VariationalModel1,
-        #"./models/vb_alpha_0.1_iter10.pkl": VariationalModel1,
-        #"./models/vb_alpha_0.01_iter10.pkl": VariationalModel1,
-        #"./models/vb_alpha_1_iter3.pkl": VariationalModel1,
-        #"./models/vb_alpha_1_iter10.pkl": VariationalModel1
+        "./models/vb_alpha_0.01_iter6.pkl": VariationalModel1,
+        "./models/vb_alpha_0.01_iter10.pkl": VariationalModel1,
+        "./models/vb_alpha_0.1_iter10.pkl": VariationalModel1,
+        "./models/vb_alpha_1_iter10.pkl": VariationalModel1,
+        "./models/continue_model2_iter9.pkl": Model2,
+        "./models/continue_model2_iter10.pkl": Model2,
     }
 
     # Don't load all models at once, use generator
     for model in (model_class.load(model_path) for model_path, model_class in model_paths.items()):
         print("Evaluating {}...".format(model.name))
         model.evaluate(
-            eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
+            eval_alignment_path=test_alignments, eval_corpus=test_corpus,
+            result_path="./eval_out/{}.naacl".format(model.name)
         )
 
-    # # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
-    # raise NotImplementedError
-    best_model1 = Model1.load("./models/vb_alpha_0.1_iter2.pkl")
-    continue_model2 = Model2(
-        name="continue_model2", save_path="./models/",
-        epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
-    )
-    continue_model2.train(corpus, epochs=EPOCHS, initialization="continue",
-                          given_probs=best_model1.translation_probs)
-    continue_model2.evaluate(
-        eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
-    )
+    # # # 9.) IBM Model 2, initialized with the translation probabilities of the best IBM model 1
+    # best_model1 = Model1.load("./models/simple_model1_iter10.pkl")
+    # continue_model2 = Model2(
+    #     name="continue_model2", save_path="./models/",
+    #     epsilon=EPSILON, eval_alignment_path="./data/validation/dev.wa.nonullalign", eval_corpus=eval_corpus
+    # )
+    # continue_model2.train(corpus, epochs=EPOCHS, initialization="continue",
+    #                       given_probs=best_model1.translation_probs)
+    # continue_model2.evaluate(
+    #     eval_alignment_path=test_alignments, eval_corpus=test_corpus, result_path="./eval_out/ibm1.mle.naacl"
+    # )
