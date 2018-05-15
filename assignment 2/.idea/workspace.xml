@@ -11,46 +11,6 @@
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file leaf-file-name="test_2017_flickr.fr" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr.fr">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="0">
-              <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="train.fr" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/data/train/train.fr">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="0">
-              <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="val.en" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/data/val/val.en">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="390">
-              <caret line="26" column="40" lean-forward="false" selection-start-line="26" selection-start-column="40" selection-end-line="26" selection-end-column="40" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="corpus.py" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/corpus.py">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="660">
-              <caret line="45" column="0" lean-forward="false" selection-start-line="45" selection-start-column="0" selection-end-line="45" selection-end-column="0" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
       <file leaf-file-name="preprocessing.md" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/data/preprocessing.md">
           <provider selected="true" editor-type-id="split-provider[text-editor;markdown-preview-editor]">
@@ -74,11 +34,71 @@
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="test_2017_flickr_truecased.en" pinned="false" current-in-tab="true">
+      <file leaf-file-name="test_2017_flickr_truecased.en" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_truecased.en">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="402">
-              <caret line="871" column="26" lean-forward="true" selection-start-line="871" selection-start-column="26" selection-end-line="871" selection-end-column="26" />
+            <state relative-caret-position="177">
+              <caret line="856" column="32" lean-forward="false" selection-start-line="856" selection-start-column="32" selection-end-line="856" selection-end-column="32" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="truecasing_corpus.fr" pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/data/truecasing_corpus.fr">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="0">
+              <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="truecasing_corpus.en" pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/data/truecasing_corpus.en">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="257">
+              <caret line="196" column="41" lean-forward="false" selection-start-line="196" selection-start-column="41" selection-end-line="196" selection-end-column="41" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="test_2017_flickr_bpe.en" pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_bpe.en">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="424">
+              <caret line="34" column="56" lean-forward="false" selection-start-line="34" selection-start-column="56" selection-end-line="34" selection-end-column="56" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="train_bpe.fr" pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/data/train/train_bpe.fr">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="0">
+              <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="train_bpe.en" pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/data/train/train_bpe.en">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="495">
+              <caret line="751" column="39" lean-forward="true" selection-start-line="751" selection-start-column="39" selection-end-line="751" selection-end-column="39" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="test_2017_flickr_bpe.fr" pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_bpe.fr">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="-13702">
+              <caret line="27" column="60" lean-forward="false" selection-start-line="27" selection-start-column="60" selection-end-line="27" selection-end-column="60" />
               <folding />
             </state>
           </provider>
@@ -88,26 +108,6 @@
         <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_lowercased.fr">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="-3666">
-              <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="test_2017_flickr_tokenized.fr" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_tokenized.fr">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="0">
-              <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
-              <folding />
-            </state>
-          </provider>
-        </entry>
-      </file>
-      <file leaf-file-name="test_2017_flickr.en" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr.en">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="0">
               <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
               <folding />
             </state>
@@ -412,8 +412,56 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_truecased.en">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="402">
-          <caret line="871" column="26" lean-forward="true" selection-start-line="871" selection-start-column="26" selection-end-line="871" selection-end-column="26" />
+        <state relative-caret-position="177">
+          <caret line="856" column="32" lean-forward="false" selection-start-line="856" selection-start-column="32" selection-end-line="856" selection-end-column="32" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/data/truecasing_corpus.fr">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="0">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/data/truecasing_corpus.en">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="257">
+          <caret line="196" column="41" lean-forward="false" selection-start-line="196" selection-start-column="41" selection-end-line="196" selection-end-column="41" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_bpe.fr">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-13702">
+          <caret line="27" column="60" lean-forward="false" selection-start-line="27" selection-start-column="60" selection-end-line="27" selection-end-column="60" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/data/test/test_2017_flickr_bpe.en">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="424">
+          <caret line="34" column="56" lean-forward="false" selection-start-line="34" selection-start-column="56" selection-end-line="34" selection-end-column="56" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/data/train/train_bpe.fr">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="0">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/data/train/train_bpe.en">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="495">
+          <caret line="751" column="39" lean-forward="true" selection-start-line="751" selection-start-column="39" selection-end-line="751" selection-end-column="39" />
           <folding />
         </state>
       </provider>
