@@ -6,8 +6,11 @@ Module defining class and function relevant for data I/O and preprocessing.
 import codecs
 from functools import reduce
 
+# EXT
+from torch.utils.data import Dataset
 
-class ParallelCorpus:
+
+class ParallelCorpus(Dataset):
     """
     Class that contains a parallel corpus used for training IBM Model 1 and 2.
     """
@@ -63,6 +66,9 @@ class ParallelCorpus:
 
     def __len__(self):
         return self.size
+
+    def __getitem__(self, item):
+        return self.source_sentences[item], self.target_sentences[item]
 
     @staticmethod
     def is_listlike(obj):
