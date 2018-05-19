@@ -66,23 +66,28 @@ class AttentionModel(nn.Module):
         positions = self.positional_embeddings(positions)
         combined_embeddings = self.combine_pos_and_word_embedding(in_words, positions)
 
-        # Decoder side
-        out_words = self.word_embeddings_out(target_sentences)
-
         # avg out encoder data to use as hidden state
         avg = torch.mean(combined_embeddings, 1)
         hidden = self.scale_h0(avg)
+        hn = (torch.unsqueeze(hidden, 0))
+        cn = (torch.unsqueeze(hidden, 0))
 
         # the hidden state from encoder RNN
         if target_sentences is not None and target_lengths is not None:
             # Force features for training
+            out_words = self.word_embeddings_out(target_sentences)
             packed_input = pack_padded_sequence(out_words, target_lengths, batch_first=True)
-            packed_output, (ht, ct) = self.lstm(packed_input, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
+            print("in", packed_input.data.size())
+            packed_output, _ = self.lstm(packed_input, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
             lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
         else:
             # Use previous outputs during testing
-            # TODO: Implement
-            ...
+            # [4751, 100])
+            # in torch.Size([1, 200])
+            # TODO: Get forward pass outside of training working
+            print("in", hidden.size())
+            packed_output, hn, cn = self.lstm(hidden, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
+            lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
 
         # prepare lstm Hidden layers for input into attention,
         # we add the hidden layer as zeroth lstm_out and remove the last one
@@ -148,6 +153,17 @@ class AttentionModel(nn.Module):
         context = torch.mean(context, 2)
 
         return context
+
+    @staticmethod
+    def get_onehots(index_tensor, vocabulary_size):
+        print(index_tensor)
+        print(index_tensor.size())
+        inp = index_tensor % vocabulary_size
+        inp_ = torch.unsqueeze(inp, 2)
+
+        one_hots = torch.FloatTensor(index_tensor.size(0), index_tensor.size(1), vocabulary_size).zero_()
+        one_hots.scatter_(2, inp_, 1)
+        return one_hots
 
     @staticmethod
     def combine_pos_and_word_embedding(words, positions):

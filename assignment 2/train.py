@@ -15,7 +15,7 @@ from corpus import ParallelCorpus
 from models import AttentionModel
 
 
-def train(model, num_epochs, loss_function, optimizer):
+def train(model, num_epochs, loss_function, optimizer, save_dir=None):
     epoch_losses = []
     iterations = len(data_loader)
 
@@ -76,6 +76,9 @@ def train(model, num_epochs, loss_function, optimizer):
         epoch_losses.append(avg_loss)
         print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
 
+        if save_dir is not None:
+            model.save("{}{}_epoch{}.model".format(save_dir, model.__class__.__name__.lower(), epoch+1))
+
 
 if __name__ == "__main__":
     # Define hyperparameters
@@ -103,5 +106,5 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
 
     # Train
-    train(model, num_epochs, loss_function, optimizer)
+    train(model, num_epochs, loss_function, optimizer, save_dir="./")
 
