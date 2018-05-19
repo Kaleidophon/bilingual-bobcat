@@ -18,7 +18,10 @@ class ParallelCorpus(Dataset):
     Class that contains a parallel corpus used for training IBM Model 1 and 2.
     """
     def __init__(self, source_path, target_path, max_sentence_length=50, max_source_vocab_size=np.inf,
-                 max_target_vocab_size=np.inf):
+                 max_target_vocab_size=np.inf, use_indices_from=None):
+        if use_indices_from:
+            assert type(use_indices_from) == type(self), "You can only use indices from another ParallelCorpus class"
+
         # Enable a way to read multiple paths into one corpus if wanted
         source_paths = source_path if self.is_listlike(source_path) else (source_path, )
         target_paths = target_path if self.is_listlike(target_path) else (target_path, )
@@ -30,10 +33,14 @@ class ParallelCorpus(Dataset):
         self.size = len(self.source_sentences)
 
         # Index corpus and create vocabulary
-        indexed_source = self.index_corpus(self.source_sentences, max_vocab_size=max_source_vocab_size)
+        indexed_source = self.index_corpus(
+            self.source_sentences, max_vocab_size=max_source_vocab_size,
+            given_word2idx=None if not use_indices_from else use_indices_from.source_w2i
+        )
         self.source_idx, self.source_vocab, self.source_w2i, self.source_i2w, self.source_vocab_size, self.source_lengths = indexed_source
         indexed_target = self.index_corpus(
-            self.target_sentences, add_sentence_delimiters=True, max_vocab_size=max_target_vocab_size
+            self.target_sentences, add_sentence_delimiters=True, max_vocab_size=max_target_vocab_size,
+            given_word2idx=None if not use_indices_from else use_indices_from.target_w2i
         )
         self.target_idx, self.target_vocab, self.target_w2i, self.target_i2w, self.target_vocab_size, self.target_lengths = indexed_target
 
@@ -51,6 +58,11 @@ class ParallelCorpus(Dataset):
         tensors = list(map(self.convert_to_tensor, data))
         sorted_tensors = self.sort_tensors(*tensors)
         self.source_tensor, self.target_tensor, self.source_lengths, self.target_lengths, self.positions = sorted_tensors
+
+    def use_other_indices(self, other_corpus):
+        assert type(self) == type(other_corpus), "Indices can only be used from another ParallelCorpus class"
+        indices = [""]
+
 
     def read_all(self, paths):
         """
@@ -77,8 +89,9 @@ class ParallelCorpus(Dataset):
 
         return sentences
 
-    def index_corpus(self, sentences, max_vocab_size=np.inf, add_sentence_delimiters=False):
-        word2idx = self.init_word2idx()
+    def index_corpus(self, sentences, max_vocab_size=np.inf, add_sentence_delimiters=False, given_word2idx=None):
+        # Use indices create on other set if given
+        word2idx = self.init_word2idx() if not given_word2idx else given_word2idx
         indexed_sentences = []
         sentence_lengths = []
         token_freqs = defaultdict(int)
@@ -160,9 +173,14 @@ class ParallelCorpus(Dataset):
 
 
 if __name__ == "__main__":
-    corpus = ParallelCorpus(
+    training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.en", target_path="./data/train/train_bpe.fr", max_source_vocab_size=20,
         max_target_vocab_size=20
     )
-    print(corpus.source_vocab)
-    print(corpus.target_vocab)
+    print("Training set token indices:\n", training_set.source_w2i.items(), "\n")
+
+    test_set = ParallelCorpus(
+        source_path="./data/test/test_2017_flickr_bpe.en", target_path="./data/test/test_2017_flickr_bpe.fr",
+        use_indices_from=training_set
+    )
+    print("Test set token indices:\n", test_set.source_w2i.items())
