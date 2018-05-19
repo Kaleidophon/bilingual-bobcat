@@ -17,7 +17,8 @@ class ParallelCorpus(Dataset):
     """
     Class that contains a parallel corpus used for training IBM Model 1 and 2.
     """
-    def __init__(self, source_path, target_path, max_sentence_length=50):
+    def __init__(self, source_path, target_path, max_sentence_length=50, max_source_vocab_size=np.inf,
+                 max_target_vocab_size=np.inf):
         # Enable a way to read multiple paths into one corpus if wanted
         source_paths = source_path if self.is_listlike(source_path) else (source_path, )
         target_paths = target_path if self.is_listlike(target_path) else (target_path, )
@@ -29,9 +30,11 @@ class ParallelCorpus(Dataset):
         self.size = len(self.source_sentences)
 
         # Index corpus and create vocabulary
-        indexed_source = self.index_corpus(self.source_sentences)
+        indexed_source = self.index_corpus(self.source_sentences, max_vocab_size=max_source_vocab_size)
         self.source_idx, self.source_vocab, self.source_w2i, self.source_i2w, self.source_vocab_size, self.source_lengths = indexed_source
-        indexed_target = self.index_corpus(self.target_sentences)
+        indexed_target = self.index_corpus(
+            self.target_sentences, add_sentence_delimiters=True, max_vocab_size=max_target_vocab_size
+        )
         self.target_idx, self.target_vocab, self.target_w2i, self.target_i2w, self.target_vocab_size, self.target_lengths = indexed_target
 
         # Create position vectors
@@ -74,31 +77,48 @@ class ParallelCorpus(Dataset):
 
         return sentences
 
-    def index_corpus(self, sentences):
+    def index_corpus(self, sentences, max_vocab_size=np.inf, add_sentence_delimiters=False):
         word2idx = self.init_word2idx()
         indexed_sentences = []
         sentence_lengths = []
+        token_freqs = defaultdict(int)
 
         for line in sentences:
-            current_indexed_sentence = []
+            current_indexed_sentence = [] if not add_sentence_delimiters else [word2idx["<bos>"]]
 
             for word in line:
+                token_freqs[word] += 1
                 current_indexed_sentence.append(word2idx[word])
 
+            if add_sentence_delimiters:
+                current_indexed_sentence.append(word2idx["<eos>"])
+
             indexed_sentences.append(current_indexed_sentence)
-            sentence_lengths.append(len(line))
+
+            sentence_length = len(line) if not add_sentence_delimiters else len(line) + 2
+            sentence_lengths.append(sentence_length)
+
+        # Remove infrequent words (they will be mapped to <unk> later) until max_vocab size is reached
+        vocab_size = len(word2idx)
+        sorted_token_freqs = sorted(list(token_freqs.items()), key=lambda x: x[1])
+
+        while len(sorted_token_freqs) > max_vocab_size:
+            infrequent_word, _ = sorted_token_freqs.pop(0)
+            del word2idx[infrequent_word]
+
+        vocab = set(word2idx.keys())
 
         idx2word = {idx: w for (w, idx) in enumerate(word2idx)}
 
-        vocab_size = len(word2idx)
-        vocab = set(word2idx.keys())
+        # After reading the data, unknown word just return the index of the <unk> token (don't generate new indices)
+        word2idx = defaultdict(lambda: word2idx["<unk>"], word2idx)
 
         return indexed_sentences, vocab, word2idx, idx2word, vocab_size, sentence_lengths
 
     @staticmethod
     def init_word2idx():
         word2idx = defaultdict(lambda: len(word2idx))
-        _ = word2idx["<pad>"], word2idx["<unk>"]
+        _ = word2idx["<pad>"], word2idx["<unk>"], word2idx["<bos>"], word2idx["<eos>"]
         return word2idx
 
     @staticmethod
@@ -140,4 +160,9 @@ class ParallelCorpus(Dataset):
 
 
 if __name__ == "__main__":
-    corpus = ParallelCorpus(source_path="./data/train/train_bpe.en", target_path="./data/train/train_bpe.fr")
+    corpus = ParallelCorpus(
+        source_path="./data/train/train_bpe.en", target_path="./data/train/train_bpe.fr", max_source_vocab_size=20,
+        max_target_vocab_size=20
+    )
+    print(corpus.source_vocab)
+    print(corpus.target_vocab)
