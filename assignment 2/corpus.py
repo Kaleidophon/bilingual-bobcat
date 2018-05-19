@@ -59,11 +59,6 @@ class ParallelCorpus(Dataset):
         sorted_tensors = self.sort_tensors(*tensors)
         self.source_tensor, self.target_tensor, self.source_lengths, self.target_lengths, self.positions = sorted_tensors
 
-    def use_other_indices(self, other_corpus):
-        assert type(self) == type(other_corpus), "Indices can only be used from another ParallelCorpus class"
-        indices = [""]
-
-
     def read_all(self, paths):
         """
         Read all corpus file at given paths and merge results.
