@@ -145,6 +145,7 @@ class AttentionModel(nn.Module):
 
         # make context vector by element wise mul
         context = alignment * encoder_outputs
+        context = torch.mean(context, 2)
 
         return context
 
