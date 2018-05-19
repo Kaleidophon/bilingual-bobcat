@@ -47,16 +47,23 @@ class AttentionModel(nn.Module):
         # concatenated with the current hidden unit to the target vocabulary in order to apply softmax
         self.projection_layer = nn.Linear(2 * embedding_dim + hidden_dim, target_vocab_size)
         # Hidden units on decoder side
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, dropout=dropout)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
         self.scale_h0 = nn.Linear(embedding_dim * 2, hidden_dim)
 
-    def forward(self, source_sentences, positions):
+        if torch.cuda.is_available():
+            self.cuda()
+        else:
+            self.cpu()
+
+    def forward(self, source_sentences, source_lengths, positions, target_sentences=None, target_lengths=None):
         """
         Forward pass through the model.
         """
+        max_len = source_lengths.max()
+
         # Encoder side
         in_words = self.word_embeddings_in(source_sentences)
-        positions = self.pos_embeddings(positions)
+        positions = self.positional_embeddings(positions)
         combined_embeddings = self.combine_pos_and_word_embedding(in_words, positions)
 
         # Decoder side
@@ -67,9 +74,15 @@ class AttentionModel(nn.Module):
         hidden = self.scale_h0(avg)
 
         # the hidden state from encoder RNN
-        packed_input = pack_padded_sequence(out_words, target_lengths, batch_first=True)
-        packed_output, (ht, ct) = self.lstm(packed_input, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
-        lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
+        if target_sentences is not None and target_lengths is not None:
+            # Force features for training
+            packed_input = pack_padded_sequence(out_words, target_lengths, batch_first=True)
+            packed_output, (ht, ct) = self.lstm(packed_input, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
+            lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
+        else:
+            # Use previous outputs during testing
+            # TODO: Implement
+            ...
 
         # prepare lstm Hidden layers for input into attention,
         # we add the hidden layer as zeroth lstm_out and remove the last one
@@ -80,8 +93,8 @@ class AttentionModel(nn.Module):
         context = self.attention(lstm_to_attn, combined_embeddings, source_lengths, max_len)
 
         # combine with non existing context vectors
-        combined = torch.cat((lstm_out, lstm_out), 2)
-        out = self.out(combined)
+        combined = torch.cat((context, lstm_out), 2)
+        out = self.projection_layer(combined)
         return out
 
     def attention(self, lstm_to_attn, encoder_outputs, source_lengths, max_len):
@@ -107,7 +120,7 @@ class AttentionModel(nn.Module):
         encoder_outputs = encoder_outputs.repeat(1, energy.size(1), 1, 1)
 
         # apply softmax to the energys
-        alignment = self.attn_soft(energy)
+        alignment = self.attention_soft(energy)
 
         # create a mask like : [1,1,1,0,0,0] whos goal is to multiply the attentions of the pads with 0, rest with 1
         idxes = torch.arange(0, max_len, out=max_len).unsqueeze(0)
@@ -142,10 +155,9 @@ class AttentionModel(nn.Module):
         """
         return torch.cat((words, positions), 2)
 
-    def load(self, model_path):
-        # TODO: Implement
-        ...
+    @staticmethod
+    def load(model_path):
+        return torch.load(model_path)
 
     def save(self, model_path):
-        # TODO: Implement
-        ...
+        torch.save(self, model_path)

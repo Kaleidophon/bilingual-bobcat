@@ -47,6 +47,8 @@ class ParallelCorpus(Dataset):
         # Create position vectors
         self.pos_base = [i for i in range(1, max_sentence_length + 1)]
         self.positions = [self.pos_base[:i] for i in self.source_lengths]
+        self.source_pad = self.source_w2i['<pad>']
+        self.target_pad = self.target_w2i['<pad>']
 
         # Pad the sentences and positions - useful in order to convert everything to tensors and train batch
         self.source_padded = self.pad_sequences(self.source_idx, self.source_lengths, self.source_w2i['<pad>'])
@@ -134,7 +136,7 @@ class ParallelCorpus(Dataset):
         # Fill everything with padding first
         padding = np.full((len(sentence_idx), max(seq_lengths)), pad)
 
-        # Replace with actual token ids whereever possible
+        # Replace with actual token ids wherever possible
         for idx, (seq, seqlen) in enumerate(zip(sentence_idx, seq_lengths)):
             padding[idx, :seqlen] = seq
 
@@ -160,22 +162,8 @@ class ParallelCorpus(Dataset):
 
     def __getitem__(self, index):
         return self.source_tensor[index], self.target_tensor[index], self.source_lengths[index], \
-               self.target_lengths[index]
+               self.target_lengths[index], self.positions[index]
 
     @staticmethod
     def is_listlike(obj):
         return type(obj) in (tuple, list, set)
-
-
-if __name__ == "__main__":
-    training_set = ParallelCorpus(
-        source_path="./data/train/train_bpe.en", target_path="./data/train/train_bpe.fr", max_source_vocab_size=20,
-        max_target_vocab_size=20
-    )
-    print("Training set token indices:\n", training_set.source_w2i.items(), "\n")
-
-    test_set = ParallelCorpus(
-        source_path="./data/test/test_2017_flickr_bpe.en", target_path="./data/test/test_2017_flickr_bpe.fr",
-        use_indices_from=training_set
-    )
-    print("Test set token indices:\n", test_set.source_w2i.items())
