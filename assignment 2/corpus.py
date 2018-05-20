@@ -54,12 +54,18 @@ class ParallelCorpus(Dataset):
         self.source_padded = self.pad_sequences(self.source_idx, self.source_lengths, self.source_w2i['<pad>'])
         self.target_padded = self.pad_sequences(self.target_idx, self.target_lengths, self.target_w2i['<pad>'])
         self.positions = self.pad_sequences(self.positions, self.source_lengths, 0)
+        self.source_sentence_ids = np.array(range(len(self.source_sentences)))
+        self.target_sentence_ids = np.array(range(len(self.source_sentences)))
 
         # Convert everything into tensors for pytorch and sort by sentence size, descending
-        data = [self.source_padded, self.target_padded, self.source_lengths, self.target_lengths, self.positions]
+        data = [
+            self.source_padded, self.target_padded, self.source_lengths, self.target_lengths, self.positions,
+            self.source_sentence_ids, self.target_sentence_ids
+        ]
         tensors = list(map(self.convert_to_tensor, data))
         sorted_tensors = self.sort_tensors(*tensors)
-        self.source_tensor, self.target_tensor, self.source_lengths, self.target_lengths, self.positions = sorted_tensors
+        self.source_tensor, self.target_tensor, self.source_lengths, self.target_lengths, self.positions, \
+            self.source_sentence_ids, self.target_sentence_ids = sorted_tensors
 
     def read_all(self, paths):
         """
@@ -118,7 +124,7 @@ class ParallelCorpus(Dataset):
 
         vocab = set(word2idx.keys())
 
-        idx2word = {idx: w for (w, idx) in enumerate(word2idx)}
+        idx2word = defaultdict(lambda: "<unk>", {idx: w for (w, idx) in word2idx.items()})
 
         # After reading the data, unknown word just return the index of the <unk> token (don't generate new indices)
         word2idx = defaultdict(lambda: word2idx["<unk>"], word2idx)
@@ -149,13 +155,15 @@ class ParallelCorpus(Dataset):
         return torch.LongTensor(data)
 
     @staticmethod
-    def sort_tensors(source, target, source_lengths, target_lengths, pos):
+    def sort_tensors(source, target, source_lengths, target_lengths, pos, source_ids, target_ids):
         target_lengths, perm_idx = target_lengths.sort(0, descending=True)
         source_tensor = source[perm_idx]
         target_tensor = target[perm_idx]
         source_lengths = source_lengths[perm_idx]
         positions = pos[perm_idx]
-        return source_tensor, target_tensor, source_lengths, target_lengths, positions
+        source_ids = source_ids[perm_idx]
+        target_ids = source_ids[perm_idx]
+        return source_tensor, target_tensor, source_lengths, target_lengths, positions, source_ids, target_ids
 
     def __len__(self):
         return self.source_tensor.size(0)

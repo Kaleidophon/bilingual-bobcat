@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     # Prepare training
     training_set = ParallelCorpus(
-        source_path="./data/train/train_bpe.en", target_path="./data/train/train_bpe.fr",
+        source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",
         max_sentence_length=max_allowed_sentence_len
     )
     data_loader = DataLoader(training_set, batch_size=batch_size)
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # Init model
     model = AttentionModel(
         source_vocab_size=training_set.source_vocab_size, target_vocab_size=training_set.target_vocab_size,
-        embedding_dim=embedding_dim, hidden_dim=hidden_dim, encoded_positions=max_allowed_sentence_len
+        embedding_dim=embedding_dim, hidden_dim=hidden_dim, encoded_positions=51
     )
     optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
 

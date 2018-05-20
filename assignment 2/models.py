@@ -69,15 +69,12 @@ class AttentionModel(nn.Module):
         # avg out encoder data to use as hidden state
         avg = torch.mean(combined_embeddings, 1)
         hidden = self.scale_h0(avg)
-        hn = (torch.unsqueeze(hidden, 0))
-        cn = (torch.unsqueeze(hidden, 0))
 
         # the hidden state from encoder RNN
         if target_sentences is not None and target_lengths is not None:
             # Force features for training
             out_words = self.word_embeddings_out(target_sentences)
             packed_input = pack_padded_sequence(out_words, target_lengths, batch_first=True)
-            print("in", packed_input.data.size())
             packed_output, _ = self.lstm(packed_input, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
             lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
         else:
@@ -85,8 +82,12 @@ class AttentionModel(nn.Module):
             # [4751, 100])
             # in torch.Size([1, 200])
             # TODO: Get forward pass outside of training working
+            in_words = self.word_embeddings_in(source_sentences)
+            print(in_words)
+            print(source_lengths)
+            packed_input = pack_padded_sequence(in_words, source_lengths, batch_first=True)
             print("in", hidden.size())
-            packed_output, hn, cn = self.lstm(hidden, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
+            packed_output, _ = self.lstm(packed_input,  (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
             lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
 
         # prepare lstm Hidden layers for input into attention,
