@@ -43,11 +43,12 @@ class AttentionModel(nn.Module):
         self.positional_embeddings = nn.Embedding(encoded_positions, embedding_dim)
         self.attention_layer = nn.Linear(embedding_dim * 2 + hidden_dim, 1)
         self.attention_soft = nn.Softmax(dim=1)
+        self.target_soft = nn.Softmax(dim=1)
         # Projecting the context vector (which is the weighted average over concats of positional and word embeddings)
         # concatenated with the current hidden unit to the target vocabulary in order to apply softmax
-        self.projection_layer = nn.Linear(2 * embedding_dim + hidden_dim, target_vocab_size)
+        self.projection_layer = nn.Linear(hidden_dim, target_vocab_size)
         # Hidden units on decoder side
-        self.lstm = nn.RNN(embedding_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.RNN(embedding_dim + hidden_dim, hidden_dim, batch_first=True)
         self.scale_h0 = nn.Linear(embedding_dim * 2, hidden_dim)
 
         if torch.cuda.is_available():
@@ -79,34 +80,48 @@ class AttentionModel(nn.Module):
 
         context = self.attention(last_hidden, encoder_output, source_lengths, max_len)
 
-        return None
-        #return out, hidden
+        print("out words", out_words.size())
+        print("context", context.size())
+        hidden_input = torch.cat((out_words, context), 1)
+        hidden_input = hidden_input.unsqueeze(1)
+        print("Hidden in", hidden_input.size(), "Last hidden", last_hidden.size())
+        hidden_out, hidden = self.lstm(hidden_input, last_hidden.unsqueeze(0))
+        hidden_out = hidden_out.squeeze(1)
+        out = self.projection_layer(hidden_out)
+        print("Projection", out.size())
+        out = self.target_soft(out)
+
+        print("out", out.size())
+
+        return out, hidden_out
 
     def attention(self, current_hidden, encoder_outputs, source_lengths, max_len):
         """
         Defining the Attention mechanism.
         """
-        batch_size, dim = current_hidden.size()
+        batch_size, hidden_dim = current_hidden.size()
+        #print("encoder out", encoder_outputs.size())
+        _, _, embedding_dim = encoder_outputs.size()
         energy = Variable(torch.zeros(batch_size, max_len))
 
         for i in range(max_len):
-            batch_size, dim = current_hidden.size()
-            #energy[i] = encoder_outputs.unsqueeze(2).matmul(current_hidden.unsqueeze(3)).squeeze(3)
-            ch = current_hidden.view(batch_size, 1, dim)
-            eo = encoder_outputs[:, i, :].view(batch_size, dim, 1)
-            energy[:, i] = torch.bmm(ch, eo).squeeze(2).squeeze(1)
+
+            # Do the attention dot product over the whole batch
+            ch = current_hidden.view(batch_size, 1, hidden_dim)
+            eo = encoder_outputs[:, i, :].view(batch_size, embedding_dim, 1)
+            #print(ch.size(), eo.size())
+            e = torch.bmm(ch, eo).squeeze(2).squeeze(1)
+            #print(ch.size(), eo.size(), e.size())
+            energy[:, i] = e
 
         # apply softmax to the energys
         alignment = self.attention_soft(energy).unsqueeze(2)
 
-        print("Encoder output", encoder_outputs.size())
-        print("align", alignment.size())
-
         # make context vector by element wise mul
         context = alignment * encoder_outputs
-        print("SUmm context", context.size())
         context = torch.mean(context, 1)
-        print("mean context", context.size())
+
+        # TODO: Do masking if necessary
 
         return context
 

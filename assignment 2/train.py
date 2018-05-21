@@ -48,7 +48,9 @@ def train(model, num_epochs, loss_function, optimizer, save_dir=None):
 
             for target_pos in range(target_len):
                 current_target_words = target_batch[:, target_pos]
-                model.decoder_forward(current_target_words, hidden, combined_embeddings, source_lengths, max_len)
+                out, hidden = model.decoder_forward(
+                    current_target_words, hidden, combined_embeddings, source_lengths, max_len
+                )
 
 
                 # # get encoder and decoder outputs
@@ -95,7 +97,7 @@ if __name__ == "__main__":
     batch_size = 128
     learning_rate = 0.01
     embedding_dim = 100
-    hidden_dim = embedding_dim * 2
+    hidden_dim = 2 * embedding_dim
     max_allowed_sentence_len = 50
 
     # Prepare training
