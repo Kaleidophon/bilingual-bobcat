@@ -100,6 +100,9 @@ class AttentionModel(nn.Module):
         """
         Defining the Attention mechanism.
         """
+        # TODO: Clean
+        # TODO: Clearly define options for attention
+        # TODO: Define other kinds of attention
         batch_size, hidden_dim = current_hidden.size()
         #print("encoder out", encoder_outputs.size())
         _, _, embedding_dim = encoder_outputs.size()
@@ -125,17 +128,6 @@ class AttentionModel(nn.Module):
         # TODO: Do masking if necessary
 
         return context
-
-    @staticmethod
-    def get_onehots(index_tensor, vocabulary_size):
-        print(index_tensor)
-        print(index_tensor.size())
-        inp = index_tensor % vocabulary_size
-        inp_ = torch.unsqueeze(inp, 2)
-
-        one_hots = torch.FloatTensor(index_tensor.size(0), index_tensor.size(1), vocabulary_size).zero_()
-        one_hots.scatter_(2, inp_, 1)
-        return one_hots
 
     @staticmethod
     def combine_pos_and_word_embedding(words, positions):

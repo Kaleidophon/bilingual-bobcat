@@ -70,6 +70,8 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
 
                 #print("Loss", out.size(), target_onehots.size())
                 #print("Loss in", out.size(), target_batch[:, target_pos].size())
+
+                # TODO: Remove BOS and EOS tokens from loss calculation
                 loss += loss_function(out, target_batch[:, target_pos])
 
             batch_losses.append(loss)

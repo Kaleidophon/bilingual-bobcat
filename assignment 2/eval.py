@@ -31,6 +31,8 @@ def evaluate(model, eval_set, target_path, reference_file_path):
     # Decode
     for source_batch, _1, source_lengths, _2, batch_positions in data_loader:
         # TODO: Don't use target sentences for prediction!
+        # TODO: Clean up
+        # TODO: Fix length related error during eval
         combined_embeddings, hidden = model.encoder_forward(source_batch, source_lengths, batch_positions)
         target_len = _2.max()
         max_len = source_lengths.max().numpy()
