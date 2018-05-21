@@ -23,11 +23,13 @@ def train(model, num_epochs, loss_function, optimizer, save_dir=None):
         start = time.time()
         batch_losses = []
         batch = 0
+
         for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
             batch_start = time.time()
-            max_len = source_lengths.max()
+            max_len = int(source_lengths.max().numpy())
             source_batch = source_batch[:, :max_len]
             batch_positions = batch_positions[:, :max_len]
+            target_len = target_lengths.max()
 
             source_batch = torch.autograd.Variable(source_batch)
             target_batch = torch.autograd.Variable(target_batch)
@@ -42,35 +44,42 @@ def train(model, num_epochs, loss_function, optimizer, save_dir=None):
                 target_lengths = target_lengths.cuda()
                 batch_positions = batch_positions.cuda()
 
-            # get encoder and decoder outputs
-            decoder_out = model.forward(
-                source_batch, source_lengths, batch_positions, target_batch, target_lengths
-            )
+            combined_embeddings, hidden = model.encoder_forward(source_batch, source_lengths, batch_positions)
 
-            # remove the start token from the targets and the end token from the decoder
-            decoder_out2 = decoder_out[:, :-1, :]
-            target_batch2 = target_batch[:, 1:decoder_out.size(1)]
+            for target_pos in range(target_len):
+                current_target_words = target_batch[:, target_pos]
+                model.decoder_forward(current_target_words, hidden, combined_embeddings, source_lengths, max_len)
 
-            # pytorch expects the inputs for the loss function to be: (batch x classes)
-            # cant handle sentences so we just transform our data to treath each individual word as a batch:
-            # so new batch size = old batch * padded sentence length
-            # should not matter as it all gets averaged out anyway
-            decoder_out3 = decoder_out2.contiguous().view(decoder_out2.size(0) * decoder_out2.size(1), decoder_out2.size(2))
-            target_batch3 = target_batch2.contiguous().view(target_batch2.size(0) * target_batch2.size(1))
 
-            # calculate loss
-            loss = loss_function(decoder_out3, target_batch3)
-            batch_losses.append(loss)
-
-            # backward and optimize
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            batch_time = time.time() - batch_start
-            print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
-                                                                                   iterations, batch_time), end='')
-            batch += 1
+                # # get encoder and decoder outputs
+                # decoder_out = model.forward(
+                #     source_batch, source_lengths, batch_positions, target_batch, target_lengths
+                # )
+                #
+                # # remove the start token from the targets and the end token from the decoder
+                # decoder_out2 = decoder_out[:, :-1, :]
+                # target_batch2 = target_batch[:, 1:decoder_out.size(1)]
+                #
+                # # pytorch expects the inputs for the loss function to be: (batch x classes)
+                # # cant handle sentences so we just transform our data to treath each individual word as a batch:
+                # # so new batch size = old batch * padded sentence length
+                # # should not matter as it all gets averaged out anyway
+                # decoder_out3 = decoder_out2.contiguous().view(decoder_out2.size(0) * decoder_out2.size(1), decoder_out2.size(2))
+                # target_batch3 = target_batch2.contiguous().view(target_batch2.size(0) * target_batch2.size(1))
+                #
+                # # calculate loss
+                # loss = loss_function(decoder_out3, target_batch3)
+                # batch_losses.append(loss)
+                #
+                # # backward and optimize
+                # optimizer.zero_grad()
+                # loss.backward()
+                # optimizer.step()
+                #
+                # batch_time = time.time() - batch_start
+                # print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
+                #                                                                        iterations, batch_time), end='')
+                # batch += 1
 
         avg_loss = sum(batch_losses) / iterations
         epoch_losses.append(avg_loss)

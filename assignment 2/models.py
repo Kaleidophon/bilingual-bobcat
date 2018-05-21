@@ -42,12 +42,12 @@ class AttentionModel(nn.Module):
         self.word_embeddings_out = nn.Embedding(self.target_vocab_size, embedding_dim)
         self.positional_embeddings = nn.Embedding(encoded_positions, embedding_dim)
         self.attention_layer = nn.Linear(embedding_dim * 2 + hidden_dim, 1)
-        self.attention_soft = nn.Softmax(dim=2)
+        self.attention_soft = nn.Softmax(dim=1)
         # Projecting the context vector (which is the weighted average over concats of positional and word embeddings)
         # concatenated with the current hidden unit to the target vocabulary in order to apply softmax
         self.projection_layer = nn.Linear(2 * embedding_dim + hidden_dim, target_vocab_size)
         # Hidden units on decoder side
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.RNN(embedding_dim, hidden_dim, batch_first=True)
         self.scale_h0 = nn.Linear(embedding_dim * 2, hidden_dim)
 
         if torch.cuda.is_available():
@@ -55,7 +55,7 @@ class AttentionModel(nn.Module):
         else:
             self.cpu()
 
-    def forward(self, source_sentences, source_lengths, positions, target_sentences=None, target_lengths=None):
+    def encoder_forward(self, source_sentences, source_lengths, positions, target_sentences=None, target_lengths=None):
         """
         Forward pass through the model.
         """
@@ -68,90 +68,45 @@ class AttentionModel(nn.Module):
 
         # avg out encoder data to use as hidden state
         avg = torch.mean(combined_embeddings, 1)
-        hidden = self.scale_h0(avg)
+        hidden0 = self.scale_h0(avg)
 
-        # the hidden state from encoder RNN
-        if target_sentences is not None and target_lengths is not None:
-            # Force features for training
-            out_words = self.word_embeddings_out(target_sentences)
-            packed_input = pack_padded_sequence(out_words, target_lengths, batch_first=True)
-            packed_output, _ = self.lstm(packed_input, (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
-            lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
-        else:
-            # Use previous outputs during testing
-            # [4751, 100])
-            # in torch.Size([1, 200])
-            # TODO: Get forward pass outside of training working
-            in_words = self.word_embeddings_in(source_sentences)
-            print(in_words)
-            print(source_lengths)
-            packed_input = pack_padded_sequence(in_words, source_lengths, batch_first=True)
-            print("in", hidden.size())
-            packed_output, _ = self.lstm(packed_input,  (torch.unsqueeze(hidden, 0), torch.unsqueeze(hidden, 0)))
-            lstm_out, _ = pad_packed_sequence(packed_output, batch_first=True)
+        return combined_embeddings, hidden0
 
-        # prepare lstm Hidden layers for input into attention,
-        # we add the hidden layer as zeroth lstm_out and remove the last one
-        # this is because we need h_i-1, not h_i
-        lstm_to_attn = torch.cat((torch.unsqueeze(hidden, 1), lstm_out), 1)
-        lstm_to_attn = lstm_to_attn[:, :-1, :]
+    def decoder_forward(self, target_words, last_hidden, encoder_output, source_lengths, max_len):
+        # In contrast to the encoder, don't get the embeddings for all words of all the batch sentences here,
+        # but instead just the embeddings for all the words at a certain position in the current batch
+        out_words = self.word_embeddings_out(target_words)
 
-        context = self.attention(lstm_to_attn, combined_embeddings, source_lengths, max_len)
+        context = self.attention(last_hidden, encoder_output, source_lengths, max_len)
 
-        # combine with non existing context vectors
-        combined = torch.cat((context, lstm_out), 2)
-        out = self.projection_layer(combined)
-        return out
+        return None
+        #return out, hidden
 
-    def attention(self, lstm_to_attn, encoder_outputs, source_lengths, max_len):
+    def attention(self, current_hidden, encoder_outputs, source_lengths, max_len):
         """
         Defining the Attention mechanism.
         """
-        # repeat the lstm out in third dimension and the encoder outputs in second dimension so we can make a meshgrid
-        # so we can do elementwise mul for all possible combinations of h_j and s_i
-        h_j = encoder_outputs.unsqueeze(1).repeat(1, lstm_to_attn.size(1), 1, 1)
-        s_i = lstm_to_attn.unsqueeze(2).repeat(1, 1, encoder_outputs.size(1), 1)
+        batch_size, dim = current_hidden.size()
+        energy = Variable(torch.zeros(batch_size, max_len))
 
-        # get the dot product between the two to get the energy
-        # the unsqueezes are there to emulate transposing. so we can use matmul as torch.dot doesnt accept matrices
-        energy = s_i.unsqueeze(3).matmul(h_j.unsqueeze(4)).squeeze(4)
-
-        #         # this is concat attention, its a different form then the ones we need
-        #         cat = torch.cat((s_i,h_j),3)
-
-        #         energy = self.attn_layer(cat)
-
-        # reshaping the encoder outputs for later
-        encoder_outputs = encoder_outputs.unsqueeze(1)
-        encoder_outputs = encoder_outputs.repeat(1, energy.size(1), 1, 1)
+        for i in range(max_len):
+            batch_size, dim = current_hidden.size()
+            #energy[i] = encoder_outputs.unsqueeze(2).matmul(current_hidden.unsqueeze(3)).squeeze(3)
+            ch = current_hidden.view(batch_size, 1, dim)
+            eo = encoder_outputs[:, i, :].view(batch_size, dim, 1)
+            energy[:, i] = torch.bmm(ch, eo).squeeze(2).squeeze(1)
 
         # apply softmax to the energys
-        alignment = self.attention_soft(energy)
+        alignment = self.attention_soft(energy).unsqueeze(2)
 
-        # create a mask like : [1,1,1,0,0,0] whos goal is to multiply the attentions of the pads with 0, rest with 1
-        idxes = torch.arange(0, max_len, out=max_len).unsqueeze(0)
-        mask = Variable((idxes < source_lengths.unsqueeze(1)).float())
-
-        # format the mask to be same size() as the attentions
-        mask = mask.unsqueeze(1).unsqueeze(3).repeat(1, alignment.size(1), 1, 1)
-
-        # apply mask
-        masked = alignment * mask
-
-        # now we have to rebalance the other values so they sum to 1 again
-        # this is done by dividing each value by the sum of the sequence
-        # calculate sums
-        msum = masked.sum(-2).repeat(1, 1, masked.size(2)).unsqueeze(3)
-
-        # rebalance
-        alignment = masked.div(msum)
-
-        # now we shape the attentions to be similar to context in size
-        alignment = alignment.repeat(1, 1, 1, encoder_outputs.size(3))
+        print("Encoder output", encoder_outputs.size())
+        print("align", alignment.size())
 
         # make context vector by element wise mul
         context = alignment * encoder_outputs
-        context = torch.mean(context, 2)
+        print("SUmm context", context.size())
+        context = torch.mean(context, 1)
+        print("mean context", context.size())
 
         return context
 

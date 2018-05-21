@@ -44,6 +44,7 @@ def evaluate(model, eval_set, target_path, reference_file_path):
 
             tokens = tokens[:eos_index]  # Cut off after first end of sentence token
             translated_sentence = " ".join(tokens).replace("@@ ", "")
+            print(translated_sentence)
             translated_sentences.append(translated_sentence)
 
     # Bring sentence back into the order they were in the test set
@@ -65,7 +66,7 @@ def evaluate(model, eval_set, target_path, reference_file_path):
 
 
 if __name__ == "__main__":
-    model = AttentionModel.load("./attentionmodel_epoch30.model")
+    model = AttentionModel.load("./attentionmodel_epoch3.model")
     max_allowed_sentence_len = 50
     training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",
