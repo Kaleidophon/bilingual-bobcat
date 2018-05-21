@@ -14,6 +14,7 @@ import time
 import numpy as np
 from torch.utils.data import DataLoader
 import torch.nn as nn
+import torch
 
 # PROJECT
 from models import AttentionModel
@@ -30,7 +31,24 @@ def evaluate(model, eval_set, target_path, reference_file_path):
     # Decode
     for source_batch, _1, source_lengths, _2, batch_positions in data_loader:
         # TODO: Don't use target sentences for prediction!
-        output = model.forward(source_batch, source_lengths, batch_positions, _1, _2)
+        combined_embeddings, hidden = model.encoder_forward(source_batch, source_lengths, batch_positions)
+        target_len = _2.max()
+        max_len = source_lengths.max().numpy()
+        outs = []
+
+        for target_pos in range(target_len):
+            current_target_words = _1[:, target_pos]
+
+            out, hidden = model.decoder_forward(
+                current_target_words, hidden, combined_embeddings, source_lengths, max_len
+            )
+            print(out.size())
+            out = out.unsqueeze(1)
+            print(out.size())
+            outs.append(out)
+
+        output = torch.cat(outs, 1)
+        print(output.size())
         normalized_output = softmax.forward(output)
         predictions = normalized_output.max(2)[1].numpy()  # Only get indices
 
@@ -66,7 +84,7 @@ def evaluate(model, eval_set, target_path, reference_file_path):
 
 
 if __name__ == "__main__":
-    model = AttentionModel.load("./attentionmodel_epoch3.model")
+    model = AttentionModel.load("./attentionmodel_epoch4.model")
     max_allowed_sentence_len = 50
     training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",

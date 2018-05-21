@@ -80,18 +80,19 @@ class AttentionModel(nn.Module):
 
         context = self.attention(last_hidden, encoder_output, source_lengths, max_len)
 
-        print("out words", out_words.size())
-        print("context", context.size())
+        #print("out words", out_words.size())
+        #print("context", context.size())
+        # TODO: Don't force features
         hidden_input = torch.cat((out_words, context), 1)
         hidden_input = hidden_input.unsqueeze(1)
-        print("Hidden in", hidden_input.size(), "Last hidden", last_hidden.size())
+        #print("Hidden in", hidden_input.size(), "Last hidden", last_hidden.size())
         hidden_out, hidden = self.lstm(hidden_input, last_hidden.unsqueeze(0))
         hidden_out = hidden_out.squeeze(1)
         out = self.projection_layer(hidden_out)
-        print("Projection", out.size())
-        out = self.target_soft(out)
+        #print("Projection", out.size())
+        #out = self.target_soft(out)
 
-        print("out", out.size())
+        #print("out", out.size())
 
         return out, hidden_out
 

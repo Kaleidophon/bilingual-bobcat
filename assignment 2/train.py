@@ -15,7 +15,7 @@ from corpus import ParallelCorpus
 from models import AttentionModel
 
 
-def train(model, num_epochs, loss_function, optimizer, save_dir=None):
+def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None):
     epoch_losses = []
     iterations = len(data_loader)
 
@@ -45,6 +45,7 @@ def train(model, num_epochs, loss_function, optimizer, save_dir=None):
                 batch_positions = batch_positions.cuda()
 
             combined_embeddings, hidden = model.encoder_forward(source_batch, source_lengths, batch_positions)
+            loss = 0
 
             for target_pos in range(target_len):
                 current_target_words = target_batch[:, target_pos]
@@ -52,36 +53,36 @@ def train(model, num_epochs, loss_function, optimizer, save_dir=None):
                     current_target_words, hidden, combined_embeddings, source_lengths, max_len
                 )
 
+                # remove the start token from the targets and the end token from the decoder
+                #out = out[:, :-1]
+                #target_batch = target_batch[:, 1:out.size(1)]
+                #print("outs2")
+                #print(out.size(), target_batch.size())
 
-                # # get encoder and decoder outputs
-                # decoder_out = model.forward(
-                #     source_batch, source_lengths, batch_positions, target_batch, target_lengths
-                # )
-                #
-                # # remove the start token from the targets and the end token from the decoder
-                # decoder_out2 = decoder_out[:, :-1, :]
-                # target_batch2 = target_batch[:, 1:decoder_out.size(1)]
-                #
-                # # pytorch expects the inputs for the loss function to be: (batch x classes)
-                # # cant handle sentences so we just transform our data to treath each individual word as a batch:
-                # # so new batch size = old batch * padded sentence length
-                # # should not matter as it all gets averaged out anyway
-                # decoder_out3 = decoder_out2.contiguous().view(decoder_out2.size(0) * decoder_out2.size(1), decoder_out2.size(2))
-                # target_batch3 = target_batch2.contiguous().view(target_batch2.size(0) * target_batch2.size(1))
-                #
-                # # calculate loss
-                # loss = loss_function(decoder_out3, target_batch3)
-                # batch_losses.append(loss)
-                #
-                # # backward and optimize
-                # optimizer.zero_grad()
-                # loss.backward()
-                # optimizer.step()
-                #
-                # batch_time = time.time() - batch_start
-                # print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
-                #                                                                        iterations, batch_time), end='')
-                # batch += 1
+                # pytorch expects the inputs for the loss function to be: (batch x classes)
+                # cant handle sentences so we just transform our data to treath each individual word as a batch:
+                # so new batch size = old batch * padded sentence length
+                # should not matter as it all gets averaged out anyway
+                #batch_size = out.size(0)
+                #out = out.view(batch_size * max_len, out.size(1))
+                #print("Reshaped out", out.size())
+                #target_batch = target_batch.view(batch_size * max_len, target_batch.size(1))
+
+                #print("Loss", out.size(), target_onehots.size())
+                #print("Loss in", out.size(), target_batch[:, target_pos].size())
+                loss += loss_function(out, target_batch[:, target_pos])
+
+            batch_losses.append(loss)
+
+            # backward and optimize
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            batch_time = time.time() - batch_start
+            print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
+                                                                                   iterations, batch_time), end='')
+            batch += 1
 
         avg_loss = sum(batch_losses) / iterations
         epoch_losses.append(avg_loss)
@@ -89,6 +90,19 @@ def train(model, num_epochs, loss_function, optimizer, save_dir=None):
 
         if save_dir is not None:
             model.save("{}{}_epoch{}.model".format(save_dir, model.__class__.__name__.lower(), epoch+1))
+
+
+def convert_to_one_hot(word_indices, target_dim):
+    y = word_indices % target_dim
+    batch_size, _ = word_indices.size()
+    # One hot encoding buffer that you create out of the loop and just keep reusing
+    y_onehot = torch.LongTensor(batch_size, target_dim)
+
+    # In your for loop
+    y_onehot.zero_()
+    y_onehot.scatter_(1, y, 1)
+
+    return y_onehot
 
 
 if __name__ == "__main__":
@@ -117,5 +131,5 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
 
     # Train
-    train(model, num_epochs, loss_function, optimizer, save_dir="./")
+    train(model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, save_dir="./")
 
