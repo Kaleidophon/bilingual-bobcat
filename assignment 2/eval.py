@@ -25,7 +25,7 @@ def evaluate(model, eval_set, target_path, reference_file_path):
     data_loader = DataLoader(eval_set, batch_size=5)
     softmax = nn.Softmax(dim=2)
     idx2word = evaluation_set.target_i2w
-    sorted_sentence_ids = evaluation_set.target_sentence_ids.numpy()
+    sorted_sentence_ids = evaluation_set.target_sentence_ids.cpu().numpy()
     translated_sentences = []
 
     # Decode
@@ -34,11 +34,13 @@ def evaluate(model, eval_set, target_path, reference_file_path):
         # TODO: Clean up
         combined_embeddings, hidden = model.encoder_forward(source_batch, batch_positions)
         target_len = _2.max()
-        max_len = source_lengths.max().numpy()
+        max_len = source_lengths.max().cpu().numpy()
         batch_size = source_batch.size(0)
         # Initialize first hidden layer input
         # 2 = <bos> token
         target_words = torch.LongTensor(np.array([2] * batch_size))
+        if torch.cuda.is_available():
+            target_words = target_words.cuda()
         predicted_word_indices = []
 
         for target_pos in range(target_len):

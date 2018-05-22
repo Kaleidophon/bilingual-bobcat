@@ -48,9 +48,15 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             loss = 0
 
             # remove then starting token for evaluation, 
-            pad_tensor = torch.zeros(target_batch.size(0),1).long().cuda()
+            pad_tensor = torch.zeros(target_batch.size(0),1).long()
+
+            if torch.cuda.is_available():
+            	pad_tensor = pad_tensor.cuda
+
             target_batch2 = target_batch[:,1:]
-            target_batch = torch.cat((target_batch,pad_tensor),1)
+            target_batch2 = torch.cat((target_batch2,pad_tensor),1)
+
+
 
             for target_pos in range(target_len):
                 current_target_words = target_batch[:, target_pos]
