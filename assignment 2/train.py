@@ -26,7 +26,7 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
 
         for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
             batch_start = time.time()
-            max_len = int(source_lengths.max().numpy())
+            max_len = int(source_lengths.max().cpu().numpy())
             source_batch = source_batch[:, :max_len]
             batch_positions = batch_positions[:, :max_len]
             target_len = target_lengths.max()
@@ -108,6 +108,9 @@ def convert_to_one_hot(word_indices, target_dim):
     # One hot encoding buffer that you create out of the loop and just keep reusing
     y_onehot = torch.LongTensor(batch_size, target_dim)
 
+    if torch.cuda.is_available():
+    	y_onehot = y_onehot.cuda()
+
     # In your for loop
     y_onehot.zero_()
     y_onehot.scatter_(1, y, 1)
@@ -131,7 +134,7 @@ if __name__ == "__main__":
     )
     data_loader = DataLoader(training_set, batch_size=batch_size)
     loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad).cpu()
-    max_corpus_sentence_len = training_set.source_lengths.max().numpy()
+    max_corpus_sentence_len = training_set.source_lengths.max().cpu().numpy()
 
     # Init model
     model = AttentionModel(

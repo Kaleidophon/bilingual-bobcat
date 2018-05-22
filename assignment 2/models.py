@@ -102,6 +102,8 @@ class AttentionModel(nn.Module):
         #print("encoder out", encoder_outputs.size())
         _, _, embedding_dim = encoder_outputs.size()
         energy = Variable(torch.zeros(batch_size, max_len))
+        if torch.cuda.is_available():
+            energy = energy.cuda()
 
         for i in range(max_len):
 
