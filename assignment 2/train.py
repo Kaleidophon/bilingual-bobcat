@@ -95,13 +95,13 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             optimizer.step()
 
             batch_time = time.time() - batch_start
-            #print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
-            #                                                                       iterations, batch_time), end='')
-            #batch += 1
+            print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
+                                                                                   iterations, batch_time), end='')
+            batch += 1
 
         avg_loss = sum(batch_losses) / iterations
         epoch_losses.append(avg_loss)
-        #print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
+        print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
 
         if save_dir is not None:
             model.save("{}{}_epoch{}.model".format(save_dir, model.__class__.__name__.lower(), epoch+1))
