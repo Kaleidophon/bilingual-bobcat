@@ -56,13 +56,10 @@ class AttentionModel(nn.Module):
         else:
             self.cpu()
 
-    def encoder_forward(self, source_sentences, source_lengths, positions, target_sentences=None, target_lengths=None):
+    def encoder_forward(self, source_sentences, positions):
         """
         Forward pass through the model.
         """
-        max_len = source_lengths.max()
-
-        # Encoder side
         in_words = self.word_embeddings_in(source_sentences)
         positions = self.positional_embeddings(positions)
         combined_embeddings = self.combine_pos_and_word_embedding(in_words, positions)
@@ -76,23 +73,21 @@ class AttentionModel(nn.Module):
     def decoder_forward(self, target_words, last_hidden, encoder_output, source_lengths, max_len):
         # In contrast to the encoder, don't get the embeddings for all words of all the batch sentences here,
         # but instead just the embeddings for all the words at a certain position in the current batch
+
+        # Get embeddings
         out_words = self.word_embeddings_out(target_words)
 
+        # Use attention mechanism
         context = self.attention(last_hidden, encoder_output, source_lengths, max_len)
 
-        #print("out words", out_words.size())
-        #print("context", context.size())
-        # TODO: Don't force features
+        # Feed concat of previous hidden output and context into next hidden unit
         hidden_input = torch.cat((out_words, context), 1)
         hidden_input = hidden_input.unsqueeze(1)
-        #print("Hidden in", hidden_input.size(), "Last hidden", last_hidden.size())
         hidden_out, hidden = self.lstm(hidden_input, last_hidden.unsqueeze(0))
         hidden_out = hidden_out.squeeze(1)
-        out = self.projection_layer(hidden_out)
-        #print("Projection", out.size())
-        #out = self.target_soft(out)
 
-        #print("out", out.size())
+        # Project into target vocabulary space
+        out = self.projection_layer(hidden_out)
 
         return out, hidden_out
 

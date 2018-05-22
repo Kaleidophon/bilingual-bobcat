@@ -30,32 +30,45 @@ def evaluate(model, eval_set, target_path, reference_file_path):
 
     # Decode
     for source_batch, _1, source_lengths, _2, batch_positions in data_loader:
-        # TODO: Don't use target sentences for prediction!
+        # TODO: Using the model's prediction only produces <bos> tokens
         # TODO: Clean up
-        # TODO: Fix length related error during eval
-        combined_embeddings, hidden = model.encoder_forward(source_batch, source_lengths, batch_positions)
+        combined_embeddings, hidden = model.encoder_forward(source_batch, batch_positions)
         target_len = _2.max()
         max_len = source_lengths.max().numpy()
-        outs = []
+        batch_size = source_batch.size(0)
+        # Initialize first hidden layer input
+        # 2 = <bos> token
+        target_words = torch.LongTensor(np.array([2] * batch_size))
+        predicted_word_indices = []
 
         for target_pos in range(target_len):
-            current_target_words = _1[:, target_pos]
-
+            print("tar input", target_words.size(), _1[:, target_pos].size())
+            # Do the forward pass
             out, hidden = model.decoder_forward(
-                current_target_words, hidden, combined_embeddings, source_lengths, max_len
+                target_words, hidden, combined_embeddings, source_lengths, max_len
             )
             print(out.size())
             out = out.unsqueeze(1)
-            print(out.size())
-            outs.append(out)
+            print("out", out)
 
-        output = torch.cat(outs, 1)
-        print(output.size())
-        normalized_output = softmax.forward(output)
-        predictions = normalized_output.max(2)[1].numpy()  # Only get indices
+            # Get predicted words
+            normalized_output = softmax.forward(out)
+            print("Norm out", normalized_output.size(), normalized_output)
+            _, predictions = normalized_output.max(2)
+            print("Predictions", predictions)
 
-        for sentence_index in range(predictions.shape[0]):
-            token_indices = predictions[sentence_index]
+            # Use predicted words as next input
+            target_words = predictions.squeeze(1)
+            print("tar", target_words.size())
+
+            # Save the predicted indices for later
+            predicted_word_indices.append(predictions)
+
+        predicted_word_indices = torch.cat(predicted_word_indices, 1)
+
+        for sentence_index in range(predicted_word_indices.shape[0]):
+            token_indices = predicted_word_indices[sentence_index]
+            print(token_indices)
             tokens = list(map(lambda idx: idx2word[idx], token_indices))
 
             eos_index = len(tokens)
@@ -86,7 +99,7 @@ def evaluate(model, eval_set, target_path, reference_file_path):
 
 
 if __name__ == "__main__":
-    model = AttentionModel.load("./attentionmodel_epoch4.model")
+    model = AttentionModel.load("./attentionmodel_epoch2.model")
     max_allowed_sentence_len = 50
     training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",

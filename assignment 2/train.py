@@ -44,11 +44,12 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
                 target_lengths = target_lengths.cuda()
                 batch_positions = batch_positions.cuda()
 
-            combined_embeddings, hidden = model.encoder_forward(source_batch, source_lengths, batch_positions)
+            combined_embeddings, hidden = model.encoder_forward(source_batch, batch_positions)
             loss = 0
 
             for target_pos in range(target_len):
                 current_target_words = target_batch[:, target_pos]
+                #print("Current target words", current_target_words)
                 out, hidden = model.decoder_forward(
                     current_target_words, hidden, combined_embeddings, source_lengths, max_len
                 )
@@ -72,7 +73,14 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
                 #print("Loss in", out.size(), target_batch[:, target_pos].size())
 
                 # TODO: Remove BOS and EOS tokens from loss calculation
-                loss += loss_function(out, target_batch[:, target_pos])
+                # Loss w/o <bos> and <eos> token
+                #print("loss", out.size(), target_batch.size())
+                if 0 < target_pos < out.size(1)-1:
+                    # TODO: Some RuntimeError because in batch 78
+                    try:
+                        loss += loss_function(out[:, :-1], target_batch[:, target_pos])
+                    except RuntimeError:
+                        print("\nloss", target_pos, out[:, :-1].size(), target_batch.size(), target_batch[:, target_pos].size(), "\n")
 
             batch_losses.append(loss)
 
