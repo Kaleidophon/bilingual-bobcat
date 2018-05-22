@@ -4,7 +4,10 @@ Main module defining the translation model.
 
 # EXT
 import numpy as np
+import torch
 import torch.nn as nn
+from torch.autograd import Variable
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 class AttentionModel(nn.Module):
@@ -35,39 +38,102 @@ class AttentionModel(nn.Module):
         self.dropout = dropout
 
         # Define weights
-        self.word_embeddings = nn.Embedding(self.source_vocab_size, embedding_dim)
+        self.word_embeddings_in = nn.Embedding(self.source_vocab_size, embedding_dim)
+        self.word_embeddings_out = nn.Embedding(self.target_vocab_size, embedding_dim)
         self.positional_embeddings = nn.Embedding(encoded_positions, embedding_dim)
-        self.attention_layer = nn.Linear(embedding_dim * 2, 1)
+        self.attention_layer = nn.Linear(embedding_dim * 2 + hidden_dim, 1)
+        self.attention_soft = nn.Softmax(dim=1)
+        self.target_soft = nn.Softmax(dim=1)
         # Projecting the context vector (which is the weighted average over concats of positional and word embeddings)
         # concatenated with the current hidden unit to the target vocabulary in order to apply softmax
-        self.projection_layer = nn.Linear(2 * embedding_dim + hidden_dim, target_vocab_size)
+        self.projection_layer = nn.Linear(hidden_dim, target_vocab_size)
         # Hidden units on decoder side
-        self.hidden_layer = nn.RNN(input_size=embedding_dim, hidden_size=hidden_dim, dropout=self.dropout)
+        self.lstm = nn.RNN(embedding_dim + hidden_dim, hidden_dim, batch_first=True)
+        self.scale_h0 = nn.Linear(embedding_dim * 2, hidden_dim)
 
-    def forward(self, *input):
+        if torch.cuda.is_available():
+            self.cuda()
+        else:
+            self.cpu()
+
+    def encoder_forward(self, source_sentences, positions):
         """
         Forward pass through the model.
         """
-        # TODO: Implement
-        ...
+        in_words = self.word_embeddings_in(source_sentences)
+        positions = self.positional_embeddings(positions)
+        combined_embeddings = self.combine_pos_and_word_embedding(in_words, positions)
 
-    def attention(self, *input):
-        """
-        Attention mechanism.
-        """
-        # TODO: Implement dot product first, then with self.attention_layer
-        ...
+        # avg out encoder data to use as hidden state
+        avg = torch.mean(combined_embeddings, 1)
+        hidden0 = self.scale_h0(avg)
 
-    def combine_pos_and_word_embedding(self, word_embedding, pos_embedding):
+        return combined_embeddings, hidden0
+
+    def decoder_forward(self, target_words, last_hidden, encoder_output, source_lengths, max_len):
+        # In contrast to the encoder, don't get the embeddings for all words of all the batch sentences here,
+        # but instead just the embeddings for all the words at a certain position in the current batch
+
+        # Get embeddings
+        out_words = self.word_embeddings_out(target_words)
+
+        # Use attention mechanism
+        context = self.attention(last_hidden, encoder_output, source_lengths, max_len)
+
+        # Feed concat of previous hidden output and context into next hidden unit
+        hidden_input = torch.cat((out_words, context), 1)
+        hidden_input = hidden_input.unsqueeze(1)
+        hidden_out, hidden = self.lstm(hidden_input, last_hidden.unsqueeze(0))
+        hidden_out = hidden_out.squeeze(1)
+
+        # Project into target vocabulary space
+        out = self.projection_layer(hidden_out)
+
+        return out, hidden_out
+
+    def attention(self, current_hidden, encoder_outputs, source_lengths, max_len):
+        """
+        Defining the Attention mechanism.
+        """
+        # TODO: Clean
+        # TODO: Clearly define options for attention
+        # TODO: Define other kinds of attention
+        batch_size, hidden_dim = current_hidden.size()
+        #print("encoder out", encoder_outputs.size())
+        _, _, embedding_dim = encoder_outputs.size()
+        energy = Variable(torch.zeros(batch_size, max_len))
+
+        for i in range(max_len):
+
+            # Do the attention dot product over the whole batch
+            ch = current_hidden.view(batch_size, 1, hidden_dim)
+            eo = encoder_outputs[:, i, :].view(batch_size, embedding_dim, 1)
+            #print(ch.size(), eo.size())
+            e = torch.bmm(ch, eo).squeeze(2).squeeze(1)
+            #print(ch.size(), eo.size(), e.size())
+            energy[:, i] = e
+
+        # apply softmax to the energys
+        alignment = self.attention_soft(energy).unsqueeze(2)
+
+        # make context vector by element wise mul
+        context = alignment * encoder_outputs
+        context = torch.mean(context, 1)
+
+        # TODO: Do masking if necessary
+
+        return context
+
+    @staticmethod
+    def combine_pos_and_word_embedding(words, positions):
         """
         Define the way positional and word embeddings are combined on the "encoder" side.
         """
-        return self.embedding_comb_func(word_embedding, pos_embedding)
+        return torch.cat((words, positions), 2)
 
-    def load(self, model_path):
-        # TODO: Implement
-        ...
+    @staticmethod
+    def load(model_path):
+        return torch.load(model_path)
 
     def save(self, model_path):
-        # TODO: Implement
-        ...
+        torch.save(self, model_path)
