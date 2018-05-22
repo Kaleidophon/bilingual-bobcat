@@ -47,6 +47,11 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             combined_embeddings, hidden = model.encoder_forward(source_batch, batch_positions)
             loss = 0
 
+            # remove then starting token for evaluation, 
+            pad_tensor = torch.zeros(target_batch.size(0),1).long().cuda()
+            target_batch2 = target_batch[:,1:]
+            target_batch = torch.cat((target_batch,pad_tensor),1)
+
             for target_pos in range(target_len):
                 current_target_words = target_batch[:, target_pos]
                 #print("Current target words", current_target_words)
@@ -74,13 +79,13 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
 
                 # TODO: Remove BOS and EOS tokens from loss calculation
                 # Loss w/o <bos> and <eos> token
-                #print("loss", out.size(), target_batch.size())
-                if 0 < target_pos < out.size(1)-1:
-                    # TODO: Some RuntimeError because in batch 78
-                    try:
-                        loss += loss_function(out[:, :-1], target_batch[:, target_pos])
-                    except RuntimeError:
-                        print("\nloss", target_pos, out[:, :-1].size(), target_batch.size(), target_batch[:, target_pos].size(), "\n")
+                print("loss", out.size(), target_batch.size())
+                #if 0 < target_pos < out.size(1)-1:
+                # TODO: Some RuntimeError because in batch 78
+                try:
+                    loss += loss_function(out, target_batch2[:, target_pos])
+                except RuntimeError:
+                    print("\nloss", target_pos, out[:, :-1].size(), target_batch.size(), target_batch[:, target_pos].size(), "\n")
 
             batch_losses.append(loss)
 
@@ -90,13 +95,13 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             optimizer.step()
 
             batch_time = time.time() - batch_start
-            print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
-                                                                                   iterations, batch_time), end='')
-            batch += 1
+            #print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
+            #                                                                       iterations, batch_time), end='')
+            #batch += 1
 
         avg_loss = sum(batch_losses) / iterations
         epoch_losses.append(avg_loss)
-        print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
+        #print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
 
         if save_dir is not None:
             model.save("{}{}_epoch{}.model".format(save_dir, model.__class__.__name__.lower(), epoch+1))
