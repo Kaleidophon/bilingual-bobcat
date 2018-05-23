@@ -15,9 +15,8 @@ from corpus import ParallelCorpus
 from models import Decoder
 
 
-def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None):
+def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterations, save_dir=None):
     epoch_losses = []
-    iterations = len(data_loader)
 
     for epoch in range(0, num_epochs):
         start = time.time()
@@ -30,6 +29,7 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             source_batch = source_batch[:, :max_len]
             batch_positions = batch_positions[:, :max_len]
             target_len = target_lengths.max()
+            target_batch = target_batch[:,:target_len]
 
             source_batch = torch.autograd.Variable(source_batch)
             target_batch = torch.autograd.Variable(target_batch)
@@ -48,7 +48,7 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
 
             # get encoder and decoder outputs
             # encoder_out = encoder(source_batch, batch_positions)
-            decoder_out = model.forward(target_batch, target_lengths, source_lengths, source_batch, batch_positions, max_len)
+            decoder_out = model.forward(target_batch, target_lengths, source_lengths, source_batch, batch_positions, max_len, target_len, force)
 
             # remove the start token from the targets and the end token from the decoder
             decoder_out2 = decoder_out[:, :-1, :]
@@ -72,6 +72,7 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             #         print(test_real)
 
             loss = loss_function(decoder_out3, target_batch3)
+            #print(loss)
             batch_losses.append(loss)
 
             # backward and optimize
@@ -79,12 +80,15 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
             loss.backward()
             optimizer.step()
 
+            batch_losses.append(loss)
+            #print(batch_losses)
             batch_time = time.time() - batch_start
             print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
                                                                                    iterations, batch_time), end='')
             batch += 1
-
+        #print(len(batch_losses)), iterations
         avg_loss = sum(batch_losses) / iterations
+        #print(avg_loss)
         epoch_losses.append(avg_loss)
         print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
 
@@ -94,12 +98,13 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, save_dir=None
 
 if __name__ == "__main__":
     # Define hyperparameters
-    num_epochs = 30
-    batch_size = 128
+    num_epochs = 10
+    batch_size = 64
     learning_rate = 0.01
     embedding_dim = 100
     hidden_dim = 2 * embedding_dim
     max_allowed_sentence_len = 50
+    force = True
 
     # Prepare training
     training_set = ParallelCorpus(
@@ -107,16 +112,20 @@ if __name__ == "__main__":
         max_sentence_length=max_allowed_sentence_len
     )
     data_loader = DataLoader(training_set, batch_size=batch_size)
-    loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad).cpu()
-    max_corpus_sentence_len = training_set.source_lengths.max().numpy()
-
+    loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad)
+    iterations = len(data_loader)
     # Init model
     model = Decoder(
         source_vocab_size=training_set.source_vocab_size, target_vocab_size=training_set.target_vocab_size,
         embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_sentence_len=max_allowed_sentence_len
     )
+    if torch.cuda.is_available():
+        loss_function = loss_function.cuda()
+        model = model.cuda()
+
     optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
 
+
     # Train
-    train(model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, save_dir="./")
+    train(model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations, save_dir="./")
 
