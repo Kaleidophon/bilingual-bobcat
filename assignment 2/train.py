@@ -29,7 +29,7 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterat
             source_batch = source_batch[:, :max_len]
             batch_positions = batch_positions[:, :max_len]
             target_len = target_lengths.max()
-            target_batch = target_batch[:,:target_len]
+            target_batch = target_batch[:, :target_len]
 
             source_batch = torch.autograd.Variable(source_batch)
             target_batch = torch.autograd.Variable(target_batch)

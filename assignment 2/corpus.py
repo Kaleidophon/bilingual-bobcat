@@ -29,6 +29,7 @@ class ParallelCorpus(Dataset):
         self.target_sentences, _ = self.read_corpus_file(
             target_path, self.max_sentence_length, other_skip_sentences=skip_sentences
         )
+
         self.size = len(self.source_sentences)
 
         # Index corpus and create vocabulary

@@ -21,12 +21,12 @@ class Decoder(nn.Module):
         self.scale_h0 = nn.Linear(embedding_dims * 2, hidden_dims)
         self.projection_layer = nn.Linear(embedding_dims * 2, target_vocab_size)
         self.softmax = nn.Softmax(dim=1)
-        self.dropout_p = 0.1  # TODO: Make model parameter
+        self.dropout_p = 0.5  # TODO: Make model parameter
         self.dropout = nn.Dropout(self.dropout_p)
 
         # Attention stuff
         self.max_length = max_length
-        self.attn = nn.Linear(hidden_dims + embedding_dims, self.max_length)
+        self.attn = nn.Linear(hidden_dims + embedding_dims * 2, 1)
         self.attn_combine = nn.Linear(hidden_dims * 2, hidden_dims)
 
         # used only in the concat version
@@ -40,15 +40,20 @@ class Decoder(nn.Module):
 
         # Concatenate current words and hidden states for attention
         #print("hidden", hidden[0].size())
-        attn_input = torch.cat((words, hidden[0].squeeze(0)), 1)
+        repeated_hidden = hidden[0].squeeze(0).unsqueeze(1).repeat(1, max_len, 1)
+        attn_input = torch.cat((encoder_outputs, repeated_hidden), 2)
 
         # Feed through linear layer and get attention weights
+        batch, sen_length, dim = attn_input.size()
+        #attn_input = attn_input.view(batch * sen_length, dim)
         attn_out = self.attn(attn_input)
+        # TODO: Add activation function here?
         attn_weights = F.softmax(attn_out, dim=1)
+        # TODO: Possibly add masking
 
         # Take weighted average over decoder output to create context vector
         #print("attn weights", attn_weights.size(), "encoder out", encoder_outputs.size())
-        attn_applied = attn_weights.unsqueeze(2) * encoder_outputs
+        attn_applied = attn_weights * encoder_outputs
         contexts = torch.mean(attn_applied, dim=1)
 
         # Concatenate words and their context vectors to feed into the hidde unit

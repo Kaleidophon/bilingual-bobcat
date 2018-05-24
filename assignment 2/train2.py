@@ -29,11 +29,10 @@ def train(encoder, decoder, num_epochs, loss_function, optimizers, target_dim, f
 
         for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
             batch_start = time.time()
+
             max_len = source_lengths.max()
-            #source_batch = source_batch[:, :max_len]
-            #batch_positions = batch_positions[:, :max_len]
             target_len = target_lengths.max()
-            target_batch = target_batch[:, :target_len]
+            # target_batch = target_batch[:, :target_len]
 
             source_batch = torch.autograd.Variable(source_batch)
             target_batch = torch.autograd.Variable(target_batch)
@@ -60,7 +59,7 @@ def train(encoder, decoder, num_epochs, loss_function, optimizers, target_dim, f
             # OR ADJUST CORPUS.PY TO ADD AN EXTRA PAD TO EACH SENTENCE.
             if use_teacher_forcing:
                 for i in range(target_len-1):
-                    word_batch = target_batch[:, i]
+                    word_batch = target_batch[:, i]  # Current correct tokens
                     decoder_out, hidden = decoder(
                         word_batch, target_lengths, encoder_out, source_lengths, max_len, hidden=hidden
                     )
