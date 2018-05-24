@@ -15,7 +15,7 @@ import torch
 from corpus import ParallelCorpus
 
 
-def evaluate(model, eval_set, target_path, reference_file_path):
+def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
     data_loader = DataLoader(eval_set, batch_size=5)
     softmax = nn.Softmax(dim=2)
     idx2word = evaluation_set.target_i2w
@@ -27,10 +27,24 @@ def evaluate(model, eval_set, target_path, reference_file_path):
     for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
         # TODO: Don't use target sentences for prediction!
         max_len = source_lengths.max()
-        output = model(target_batch, target_lengths, source_lengths, source_batch, batch_positions, max_len)
-        normalized_output = softmax.forward(output)
+        encoder_output, hidden = encoder(source_batch, batch_positions)
+
+        decoder_in = target_batch[:, 0]
+        for i in range(50):  # TODO: Use variable here
+            # TODO: METHOD TO LIMIT TO SENTENCES STILL ACTIVE IN i (ie NOT PADDING RIGHT NOW)
+            # PERHAPS NOT NEEDED AS LOSS INGNORES PADS ANYWAY???
+            decoder_out, hidden = decoder(
+                decoder_in, target_lengths, encoder_output, source_lengths, max_len, hidden=hidden
+            )
+            _, words = decoder_out.topk(1)
+            decoder_in = words.squeeze().detach()  # this is not tested.
+
+        normalized_output = softmax(decoder_out)
+
         predictions = normalized_output.max(2)[1].cpu().numpy()  # Only get indices
         _, sentence = torch.max(normalized_output[0], 1)
+
+
 
         for sentence_index in range(predictions.shape[0]):
             token_indices = predictions[sentence_index, :]
@@ -62,7 +76,8 @@ def evaluate(model, eval_set, target_path, reference_file_path):
 
 
 if __name__ == "__main__":
-    model = torch.load("./decoder_epoch1.model")
+    encoder = torch.load("./encoder_epoch6.model")
+    decoder = torch.load("./decoder_epoch6.model")
     max_allowed_sentence_len = 50
     training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",
@@ -73,7 +88,7 @@ if __name__ == "__main__":
         max_sentence_length=max_allowed_sentence_len, use_indices_from=training_set
     )
     evaluate(
-        model, evaluation_set, target_path="./eval_out.txt",
+        encoder, decoder, evaluation_set, target_path="./eval_out.txt",
         reference_file_path="./data/test/test_2017_flickr_truecased.en"
     )
 

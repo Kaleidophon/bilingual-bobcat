@@ -30,8 +30,8 @@ def train(encoder, decoder, num_epochs, loss_function, optimizers, target_dim, f
         for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
             batch_start = time.time()
             max_len = source_lengths.max()
-            source_batch = source_batch[:, :max_len]
-            batch_positions = batch_positions[:, :max_len]
+            #source_batch = source_batch[:, :max_len]
+            #batch_positions = batch_positions[:, :max_len]
             target_len = target_lengths.max()
             target_batch = target_batch[:, :target_len]
 
@@ -52,8 +52,6 @@ def train(encoder, decoder, num_epochs, loss_function, optimizers, target_dim, f
 
             # get encoder outputs
             encoder_out, hidden = encoder(source_batch, batch_positions)
-            # TODO BUG: Sometimes the encoder sentence length varies
-            print("sentence length:", encoder_out.size(1))
 
             use_teacher_forcing = True if random.random() <= force else False
 
