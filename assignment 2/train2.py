@@ -54,9 +54,6 @@ def train(encoder, decoder, num_epochs, loss_function, optimizers, target_dim, f
 
             use_teacher_forcing = True if random.random() <= force else False
 
-            # BOTH LIKELY TO GO OUT OF BOUNDS DUE TO THE +1 IN THE LOSS CALC LINE.
-            # EITHER APPEND A PAD LINE TO THE TARGET BATCH AT THE END HERE OR
-            # OR ADJUST CORPUS.PY TO ADD AN EXTRA PAD TO EACH SENTENCE.
             if use_teacher_forcing:
                 for i in range(target_len-1):
                     word_batch = target_batch[:, i]  # Current correct tokens
@@ -93,7 +90,7 @@ def train(encoder, decoder, num_epochs, loss_function, optimizers, target_dim, f
 
         if save_dir is not None:
             torch.save(encoder, "{}{}_epoch{}.model".format(save_dir, encoder.__class__.__name__.lower(), epoch+1))
-            torch.save(decoder, "{}{}_epoch{}.model".format(save_dir, decoder.__class__.__name__.lower(), epoch + 1))
+            torch.save(decoder, "{}{}_epoch{}.model".format(save_dir, decoder.__class__.__name__.lower(), epoch+1))
 
 
 if __name__ == "__main__":
