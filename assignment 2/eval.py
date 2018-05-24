@@ -35,7 +35,7 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
             # TODO: METHOD TO LIMIT TO SENTENCES STILL ACTIVE IN i (ie NOT PADDING RIGHT NOW)
             # PERHAPS NOT NEEDED AS LOSS INGNORES PADS ANYWAY???
             decoder_out, hidden = decoder(
-                decoder_in, target_lengths, encoder_output, source_lengths, max_len, hidden=hidden
+                decoder_in, encoder_output, max_len, previous_hidden=hidden
             )
             _, words = decoder_out.topk(1)
             decoder_in = words.squeeze().detach()  # this is not tested.
@@ -58,6 +58,7 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
             tokens = tokens[:eos_index]  # Cut off after first end of sentence token
 
             translated_sentence = " ".join(tokens).replace("@@ ", "")
+            print(translated_sentence)
             translated_sentences.append(translated_sentence)
 
     # Bring sentence back into the order they were in the test set
@@ -77,8 +78,8 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
 
 
 if __name__ == "__main__":
-    encoder = torch.load("./encoder_epoch6.model")
-    decoder = torch.load("./decoder_epoch6.model")
+    encoder = torch.load("./encoder_epoch1.model")
+    decoder = torch.load("./decoder_epoch1.model")
     max_allowed_sentence_len = 50
     training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",

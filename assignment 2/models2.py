@@ -29,33 +29,37 @@ class Decoder(nn.Module):
         self.attn = nn.Linear(hidden_dims + embedding_dims, 1)
         self.attn_layer = nn.Linear(embedding_dims + hidden_dims, 1)
 
-    def forward(self, target_sentences, target_lengths, encoder_outputs, source_lengths, max_len, hidden=None):
+    def forward(self, target_sentences, encoder_outputs, max_len, previous_hidden, padded_positions):
         words = self.decoder_embeddings(target_sentences)
         words = self.dropout(words)  # Batch x Embedding dim
 
         # Concatenate current words and hidden states for attention
         # Batch x Positions x Hidden dim
-        repeated_hidden = hidden[0].squeeze(0).unsqueeze(1).repeat(1, encoder_outputs.size(1), 1)
+        repeated_hidden = previous_hidden[0].squeeze(0).unsqueeze(1).repeat(1, encoder_outputs.size(1), 1)
         attn_input = torch.cat((encoder_outputs, repeated_hidden), 2)  # Batch x Positions x (Embedding + Hidden dim)
 
         # Feed through linear layer and get attention weights
         attn_out = self.attn(attn_input)  # Scalars Batch x Positions x 1
         # TODO: Add activation function here?
         attn_weights = F.softmax(attn_out, dim=1)  # Scalars Batch x Positions x 1
-        # TODO: Possibly add masking
+
+        # Mask attention to padded tokens
+        normed_attn_weights = attn_weights.clone()
+        normed_attn_weights[padded_positions] = 0
+
+        # Renormalize weights
+        norm = torch.sum(normed_attn_weights, dim=1)
+        norm = norm.repeat(1, 50).unsqueeze(2)
+        normed_attn_weights = torch.div(normed_attn_weights, norm)
 
         # Take weighted average over decoder output to create context vector
-        attn_applied = attn_weights * encoder_outputs  # Batch x Positions x Embedding dim
+        attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
         contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
 
         # Concatenate words and their context vectors to feed into the hidden unit
         output = torch.cat((words, contexts), 1).unsqueeze(1)  # Batch x 1 x 2 * Embedding dim
 
-        # !!! Note: In the pytorch sequence2sequence tutorial, the concatenated output is run through a combinatnion
-        # layer again (self.attn_combine) before fed into the hidden unit !!!
-        # -> Is that really necessary?
-
-        out, hidden = self.lstm(output, hidden)  # Batch x 1 x Hidden dim
+        out, hidden = self.lstm(output, previous_hidden)  # Batch x 1 x Hidden dim
 
         # Take softmax
         out = self.projection_layer(out).squeeze(1)
@@ -65,7 +69,7 @@ class Decoder(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, source_vocab_size, max_sentence_len, embedding_dims, hidden_dims):
+    def __init__(self, source_vocab_size, max_sentence_len, embedding_dims, hidden_dims, pad_index):
         super().__init__()
         self.encoder_embeddings = nn.Embedding(source_vocab_size, embedding_dims)  # embed words
         self.pos_embeddings = nn.Embedding(max_sentence_len + 1, embedding_dims)  # embed positions
@@ -73,10 +77,15 @@ class Encoder(nn.Module):
         self.max_sentence_len = max_sentence_len
         self.embedding_dims = embedding_dims
         self.cat_linear = nn.Linear(2 * embedding_dims, embedding_dims)
+        self.pad_index = pad_index
 
     def forward(self, source_sentences, positions):
         words = self.encoder_embeddings(source_sentences)
         pos = self.pos_embeddings(positions)
+
+        # Get positions that are padded
+        src_sentences = source_sentences.clone()
+        padded_positions = src_sentences == self.pad_index
 
         cat = torch.cat((words, pos), 2)
         cat = self.cat_linear(cat)
@@ -88,4 +97,4 @@ class Encoder(nn.Module):
         hidden = F.relu(hidden)  # Batch x Hidden dim
         hidden = (hidden.unsqueeze(0), hidden.unsqueeze(0))
 
-        return cat, hidden
+        return cat, hidden, padded_positions
