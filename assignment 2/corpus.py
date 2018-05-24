@@ -23,13 +23,12 @@ class ParallelCorpus(Dataset):
             assert type(use_indices_from) == type(self), "You can only use indices from another ParallelCorpus class"
 
         # Enable a way to read multiple paths into one corpus if wanted
-        source_paths = source_path if self.is_listlike(source_path) else (source_path, )
-        target_paths = target_path if self.is_listlike(target_path) else (target_path, )
-
         # Read in all the data
         self.max_sentence_length = max_sentence_length
-        self.source_sentences = self.read_all(source_paths)
-        self.target_sentences = self.read_all(target_paths)
+        self.source_sentences, skip_sentences = self.read_corpus_file(source_path, self.max_sentence_length)
+        self.target_sentences, _ = self.read_corpus_file(
+            target_path, self.max_sentence_length, other_skip_sentences=skip_sentences
+        )
         self.size = len(self.source_sentences)
 
         # Index corpus and create vocabulary
@@ -79,18 +78,24 @@ class ParallelCorpus(Dataset):
         return reduce(_combine_lists, sentences_per_path)
 
     @staticmethod
-    def read_corpus_file(path, max_sentence_length, filter_characters=[]):
+    def read_corpus_file(path, max_sentence_length, other_skip_sentences=set(), filter_characters=[]):
         sentences = []
+        skip_sentences = set()  # Keep track of sentences which are skipped due to length so they can be skipped in the
+        # other corpus file too
 
         with codecs.open(path, "rb", "utf-8") as corpus:
-            for line in corpus.readlines():
+            for i, line in enumerate(corpus.readlines()):
                 tokens = [token for token in line.strip().split() if token not in filter_characters]
 
-                # Filter out sentences that are too long
-                if len(tokens) <= max_sentence_length:
+                # Filter out sentences that are too long if you're reading the first part of the parallel corpus
+                # Or filter them out if they have been filtered out in the previous part of the corpus
+                if (len(tokens) <= max_sentence_length and len(other_skip_sentences) == 0) \
+                        or i not in other_skip_sentences:
                     sentences.append(tokens)
+                else:
+                    skip_sentences.add(i)
 
-        return sentences
+        return sentences, skip_sentences
 
     def index_corpus(self, sentences, max_vocab_size=np.inf, add_sentence_delimiters=False, given_word2idx=None):
         # Use indices create on other set if given
