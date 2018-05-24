@@ -40,12 +40,11 @@ class Decoder(nn.Module):
 
         # Concatenate current words and hidden states for attention
         #print("hidden", hidden[0].size())
-        repeated_hidden = hidden[0].squeeze(0).unsqueeze(1).repeat(1, max_len, 1)
+        repeated_hidden = hidden[0].squeeze(0).unsqueeze(1).repeat(1, encoder_outputs.size(1), 1)
+        #print(encoder_outputs, repeated_hidden)
         attn_input = torch.cat((encoder_outputs, repeated_hidden), 2)
 
         # Feed through linear layer and get attention weights
-        batch, sen_length, dim = attn_input.size()
-        #attn_input = attn_input.view(batch * sen_length, dim)
         attn_out = self.attn(attn_input)
         # TODO: Add activation function here?
         attn_weights = F.softmax(attn_out, dim=1)
