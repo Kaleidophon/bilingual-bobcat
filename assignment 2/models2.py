@@ -47,6 +47,7 @@ class Decoder(nn.Module):
         attn_weights = F.softmax(attn_out, dim=1)
 
         # Take weighted average over decoder output to create context vector
+        #print("attn weights", attn_weights.size(), "encoder out", encoder_outputs.size())
         attn_applied = attn_weights.unsqueeze(2) * encoder_outputs
         contexts = torch.mean(attn_applied, dim=1)
 

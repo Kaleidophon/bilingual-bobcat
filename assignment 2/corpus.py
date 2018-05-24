@@ -142,10 +142,9 @@ class ParallelCorpus(Dataset):
         _ = word2idx["<pad>"], word2idx["<unk>"], word2idx["<bos>"], word2idx["<eos>"]
         return word2idx
 
-    @staticmethod
-    def pad_sequences(sentence_idx, seq_lengths, pad):
+    def pad_sequences(self, sentence_idx, seq_lengths, pad):
         # Fill everything with padding first
-        padding = np.full((len(sentence_idx), max(seq_lengths)), pad)
+        padding = np.full((len(sentence_idx), self.max_sentence_length), pad)
 
         # Replace with actual token ids wherever possible
         for idx, (seq, seqlen) in enumerate(zip(sentence_idx, seq_lengths)):

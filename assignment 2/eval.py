@@ -17,7 +17,7 @@ from corpus import ParallelCorpus
 
 def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
     data_loader = DataLoader(eval_set, batch_size=5)
-    softmax = nn.Softmax(dim=2)
+    softmax = nn.Softmax(dim=1)
     idx2word = evaluation_set.target_i2w
     sorted_sentence_ids = evaluation_set.target_sentence_ids.cpu().numpy()
     translated_sentences = []
@@ -26,6 +26,7 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
     # for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
     for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
         # TODO: Don't use target sentences for prediction!
+        predicted_batch_words = []
         max_len = source_lengths.max()
         encoder_output, hidden = encoder(source_batch, batch_positions)
 
@@ -39,17 +40,17 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
             _, words = decoder_out.topk(1)
             decoder_in = words.squeeze().detach()  # this is not tested.
 
-        normalized_output = softmax(decoder_out)
+            # Get predicted word for every batch instance
+            normalized_output = softmax(decoder_out)
+            predictions = normalized_output.max(1)[1]  # Only get indices
+            predicted_batch_words.append(predictions.unsqueeze(1))
 
-        predictions = normalized_output.max(2)[1].cpu().numpy()  # Only get indices
-        _, sentence = torch.max(normalized_output[0], 1)
+        predicted_batch_words = torch.cat(predicted_batch_words, 1)
 
+        for sentence_index in range(predicted_batch_words.shape[0]):
+            token_indices = list(predicted_batch_words[sentence_index, :].numpy())
 
-
-        for sentence_index in range(predictions.shape[0]):
-            token_indices = predictions[sentence_index, :]
             tokens = list(map(lambda idx: idx2word[idx], token_indices))
-
             eos_index = len(tokens)
             if "<eos>" in tokens:
                 eos_index = tokens.index("<eos>")
