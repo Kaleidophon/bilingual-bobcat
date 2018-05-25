@@ -2,6 +2,8 @@
 Main module defining the translation model.
 """
 
+import random
+
 # EXT
 import numpy as np
 import torch
@@ -9,6 +11,51 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+
+class NMTModel(nn.Module):
+    def __init__(self, source_vocab_size, max_sentence_len, embedding_dims, hidden_dims, pad_index, target_vocab_size,
+                 max_length):
+        super().__init__()
+
+        self.encoder = Encoder(
+            source_vocab_size, max_sentence_len, embedding_dims, hidden_dims, pad_index
+        )
+        self.decoder = Decoder(
+            target_vocab_size, embedding_dims, hidden_dims, max_length
+        )
+
+    def forward(self, source_batch, source_lengths, batch_positions, teacher_forcing=1, target_batch=None):
+        max_len = source_lengths.max()
+        predicted_words = []
+
+        encoder_out, previous_hidden, padded_positions = self.encoder(source_batch, batch_positions)
+
+        use_teacher_forcing = True if random.random() <= teacher_forcing else False
+
+        if use_teacher_forcing:
+
+            for i in range(self.decoder.max_length - 1):
+                word_batch = target_batch[:, i]
+                decoder_out, current_hidden = self.decoder(
+                    word_batch, encoder_out, max_len, previous_hidden=previous_hidden,
+                    padded_positions=padded_positions
+                )
+                predicted_words.append(decoder_out)
+                previous_hidden = current_hidden
+
+        else:
+            decoder_in = target_batch[:, 0]
+            for i in range(self.decoder.max_length - 1):
+                decoder_out, current_hidden = self.decoder(
+                    decoder_in, previous_hidden, encoder_out
+                )
+                _, words = decoder_out.topk(1)
+                decoder_in = words.squeeze().detach()  # this is not tested.
+                predicted_words.append(decoder_in)
+                previous_hidden = current_hidden
+
+        return predicted_words
 
 
 class Decoder(nn.Module):
@@ -50,12 +97,12 @@ class Decoder(nn.Module):
         norm = torch.sum(normed_attn_weights, dim=1)
         norm = norm.repeat(1, 50).unsqueeze(2)
         normed_attn_weights = torch.div(normed_attn_weights, norm)
-        normed_attn_weights = normed_attn_weights.squeeze(2).unsqueeze(1)
-        contexts = torch.bmm(normed_attn_weights, encoder_outputs).squeeze(1)
+        #normed_attn_weights = normed_attn_weights.squeeze(2).unsqueeze(1)
+        #contexts = torch.bmm(normed_attn_weights, encoder_outputs).squeeze(1)
 
         # Take weighted average over decoder output to create context vector
-        #attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
-        #contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
+        attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
+        contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
 
         # Concatenate words and their context vectors to feed into the hidden unit
         output = torch.cat((words, contexts), 1).unsqueeze(1)  # Batch x 1 x 2 * Embedding dim
@@ -80,6 +127,7 @@ class Encoder(nn.Module):
         self.cat_linear = nn.Linear(2 * embedding_dims, embedding_dims)
         self.pad_index = pad_index
         self.dropout = nn.Dropout(0.5)
+        self.gru = torch.nn.GRU(2 * embedding_dims, hidden_dims)
 
     def forward(self, source_sentences, positions):
         words = self.encoder_embeddings(source_sentences)

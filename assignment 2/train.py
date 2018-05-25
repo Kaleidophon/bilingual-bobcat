@@ -16,10 +16,10 @@ import torch.nn.functional as F
 
 # PROJECT
 from corpus import ParallelCorpus
-from models import Encoder, Decoder
+from models import Encoder, Decoder, NMTModel
 
 
-def train(encoder, decoder, num_epochs, loss_function, optimizer, target_dim, force, iterations, save_dir=None,
+def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterations, save_dir=None,
           dataset=None, debug=False, clip=0.25):
     epoch_losses = []
 
@@ -71,58 +71,24 @@ def train(encoder, decoder, num_epochs, loss_function, optimizer, target_dim, fo
 
             loss = 0
 
-            # get encoder outputs
-            #encoder_out, previous_hidden = encoder(source_batch, source_lengths)
-            encoder_out, previous_hidden, padded_positions = encoder(source_batch, batch_positions)
+            predicted_words = model.forward(source_batch, source_lengths, batch_positions, target_batch=target_batch)
 
-            use_teacher_forcing = True if random.random() <= force else False
+            for i in range(target_len - 1):
+                predicted_words_at_pos = predicted_words[i]
+                predicted_words_at_pos = F.softmax(predicted_words_at_pos, dim=1)
+                predicted_words_idx = torch.argmax(predicted_words_at_pos, dim=1)
+                print(
+                    "Predicted:\n",
+                    np.array([dataset.target_i2w[idx] for idx in predicted_words_idx.numpy()]),
+                    "\nExpected:\n",
+                    np.array([dataset.target_i2w[idx] for idx in target_batch[:, i + 1].numpy()]),
+                    "\n\n"
+                )
 
-            if use_teacher_forcing:
-                bloss = 0
-                for i in range(target_len-1):
-                    word_batch = target_batch[:, i]  # Current correct tokens
-                    #decoder_out, current_hidden = decoder(
-                    #    word_batch, previous_hidden, encoder_out
-                    #)
-                    decoder_out, current_hidden = decoder(
-                        word_batch, encoder_out, max_len, previous_hidden=previous_hidden,
-                        padded_positions=padded_positions
-                    )
-                    bloss += loss_function(decoder_out, target_batch[:, i + 1])
-                    previous_hidden = current_hidden
-
-                    # TODO: Remove this debugging printing
-                    #print("Out", F.softmax(decoder_out))
-                    if debug:
-                        _, words = decoder_out.topk(1)
-                        decoder_in = words.squeeze().detach()
-                        decoder_word_predictions = np.array([dataset.target_i2w[idx] for idx in decoder_in.numpy()])
-                        overlap = target_batch_sentences[:, i].T == decoder_word_predictions
-                        print(
-                            "Given \n", target_batch_sentences[:, i].T,
-                            "\nTry to predict\n", target_batch_sentences[:, i + 1].T,
-                            "\nPredicted:\n", decoder_word_predictions,
-                            "\nCorrectly predicted: {:.2f} %".format((list(overlap).count(True) / len(overlap) * 100)),
-                            "\n\n\n"
-                        )
-                #bloss /= batch_size
-                loss += bloss
-            else:
-                decoder_in = target_batch[:, 0]
-                for i in range(target_len-1):
-                    # TODO: METHOD TO LIMIT TO SENTENCES STILL ACTIVE IN i (ie NOT PADDING RIGHT NOW)
-                    # PERHAPS NOT NEEDED AS LOSS INGNORES PADS ANYWAY???
-                    decoder_out, current_hidden = decoder(
-                        decoder_in, previous_hidden, encoder_out
-                    )
-                    loss += loss_function(decoder_out, target_batch[:, i+1])
-                    _, words = decoder_out.topk(1)
-                    decoder_in = words.squeeze().detach()  # this is not tested.
-                    previous_hidden = current_hidden
+                loss += loss_function(predicted_words_at_pos, target_batch[:, i + 1])
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-            torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
 
             optimizer.step()
             optimizer.zero_grad()
@@ -141,16 +107,15 @@ def train(encoder, decoder, num_epochs, loss_function, optimizer, target_dim, fo
         print('Time: {:.1f}s Loss: {:.3f}'.format(time.time() - start, batch_loss))
 
         if save_dir is not None:
-            torch.save(encoder, "{}{}_epoch{}.model".format(save_dir, encoder.__class__.__name__.lower(), epoch+1))
-            torch.save(decoder, "{}{}_epoch{}.model".format(save_dir, decoder.__class__.__name__.lower(), epoch+1))
+            torch.save(model, "{}{}_epoch{}.model".format(save_dir, model.__class__.__name__.lower(), epoch+1))
 
 
 if __name__ == "__main__":
     # Define hyperparameters
     num_epochs = 10
-    batch_size = 128
+    batch_size = 50
     learning_rate = 0.01
-    embedding_dim = 100
+    embedding_dim = 256
     hidden_dim = 2 * embedding_dim
     max_allowed_sentence_len = 50
     force = 1
@@ -161,28 +126,33 @@ if __name__ == "__main__":
         max_sentence_length=max_allowed_sentence_len
     )
     data_loader = DataLoader(training_set, batch_size=batch_size)
-    loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad)
+    loss_function = nn.NLLLoss(ignore_index=training_set.target_pad)
     iterations = len(data_loader)
 
-    encoder = Encoder(
+    # encoder = Encoder(
+    #     source_vocab_size=training_set.source_vocab_size, embedding_dims=embedding_dim,
+    #     max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad
+    # )
+    #
+    # decoder = Decoder(
+    #     target_vocab_size=training_set.target_vocab_size,
+    #     embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_length=max_allowed_sentence_len
+    # )
+    model = NMTModel(
         source_vocab_size=training_set.source_vocab_size, embedding_dims=embedding_dim,
-        max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad
+        max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad,
+        target_vocab_size=training_set.target_vocab_size, max_length=max_allowed_sentence_len
     )
 
-    decoder = Decoder(
-        target_vocab_size=training_set.target_vocab_size,
-        embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_length=max_allowed_sentence_len
-    )
     if torch.cuda.is_available():
         loss_function = loss_function.cuda()
-        encoder = encoder.cuda()
-        decoder = decoder.cuda()
+        model = model.cuda()
 
-    optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     # Train
     train(
-        encoder, decoder, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations,
+        model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations,
         save_dir="./", dataset=training_set, debug=True
     )
 
