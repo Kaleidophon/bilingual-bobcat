@@ -116,7 +116,7 @@ if __name__ == "__main__":
     batch_size = 50
     learning_rate = 0.01
     embedding_dim = 256
-    hidden_dim = 2 * embedding_dim
+    hidden_dim = embedding_dim
     max_allowed_sentence_len = 50
     force = 1
 
