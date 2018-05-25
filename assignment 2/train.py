@@ -4,32 +4,57 @@ Module defining the model training function.
 
 # STD
 import time
+import random
 
 # EXT
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+import numpy as np
+import torch.nn.functional as F
+#np.set_printoptions(threshold=np.nan)
 
 # PROJECT
 from corpus import ParallelCorpus
-from models import Decoder
+from models import Encoder, Decoder
 
 
-def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterations, save_dir=None):
+def train(encoder, decoder, num_epochs, loss_function, optimizer, target_dim, force, iterations, save_dir=None,
+          dataset=None, debug=False, clip=0.25):
     epoch_losses = []
 
     for epoch in range(0, num_epochs):
         start = time.time()
-        batch_losses = []
+        batch_loss = 0
         batch = 0
 
         for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
             batch_start = time.time()
+            batch_size = source_batch.size(0)
+
+            if debug:
+                source_batch_sentences = source_batch.numpy()
+                source_batch_sentences = np.array([
+                    np.array(list(map(lambda tid: dataset.source_i2w[tid], source_batch_sentences[i])))
+                    for i in range(source_batch_sentences.shape[0])
+                ])
+                target_batch_sentences = target_batch.numpy()
+                target_batch_sentences = np.array([
+                    np.array(list(map(lambda tid: dataset.target_i2w[tid], target_batch_sentences[i])))
+                    for i in range(target_batch_sentences.shape[0])
+                ])
+                print(
+                    "Source sentences\n", source_batch_sentences,
+                    "\nTarget sentences:\n", target_batch_sentences,
+                    "\nSource lengths:\n", source_lengths,
+                    "\nTarget lengths:\n", target_lengths,
+                    "\nPositions:\n", batch_positions,
+                    "\n"
+                )
+
             max_len = source_lengths.max()
-            source_batch = source_batch[:, :max_len]
-            batch_positions = batch_positions[:, :max_len]
             target_len = target_lengths.max()
-            target_batch = target_batch[:, :target_len]
+            # target_batch = target_batch[:, :target_len]
 
             source_batch = torch.autograd.Variable(source_batch)
             target_batch = torch.autograd.Variable(target_batch)
@@ -46,64 +71,89 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterat
 
             loss = 0
 
-            # get encoder and decoder outputs
-            # encoder_out = encoder(source_batch, batch_positions)
-            decoder_out = model.forward(target_batch, target_lengths, source_lengths, source_batch, batch_positions, max_len, target_len, force)
+            # get encoder outputs
+            #encoder_out, previous_hidden = encoder(source_batch, source_lengths)
+            encoder_out, previous_hidden, padded_positions = encoder(source_batch, batch_positions)
 
-            # remove the start token from the targets and the end token from the decoder
-            decoder_out2 = decoder_out[:, :-1, :]
-            target_batch2 = target_batch[:, 1:decoder_out.size(1)]
+            use_teacher_forcing = True if random.random() <= force else False
 
-            # pytorch expects the inputs for the loss function to be: (batch x classes)
-            # cant handle sentences so we just transform our data to treath each individual word as a batch:
-            # so new batch size = old batch * padded sentence length
-            # should not matter as it all gets averaged out anyway
-            decoder_out3 = decoder_out2.contiguous().view(decoder_out2.size(0) * decoder_out2.size(1),
-                                                          decoder_out2.size(2))
-            target_batch3 = target_batch2.contiguous().view(target_batch2.size(0) * target_batch2.size(1))
+            if use_teacher_forcing:
+                bloss = 0
+                for i in range(target_len-1):
+                    word_batch = target_batch[:, i]  # Current correct tokens
+                    #decoder_out, current_hidden = decoder(
+                    #    word_batch, previous_hidden, encoder_out
+                    #)
+                    decoder_out, current_hidden = decoder(
+                        word_batch, encoder_out, max_len, previous_hidden=previous_hidden,
+                        padded_positions=padded_positions
+                    )
+                    bloss += loss_function(decoder_out, target_batch[:, i + 1])
+                    previous_hidden = current_hidden
 
-            # calculate loss
-            # print(decoder_out2.size())
-            # print(target_batch[0])
-            #         _, sentence = torch.max(decoder_out2[0],1)
-            #         test_pred = [dataset.target_i2w[word] for word in sentence.cpu().numpy()]
-            #         print(test_pred)
-            #         test_real = [dataset.target_i2w[word] for word in target_batch2[0].cpu().numpy()]
-            #         print(test_real)
+                    # TODO: Remove this debugging printing
+                    #print("Out", F.softmax(decoder_out))
+                    if debug:
+                        _, words = decoder_out.topk(1)
+                        decoder_in = words.squeeze().detach()
+                        decoder_word_predictions = np.array([dataset.target_i2w[idx] for idx in decoder_in.numpy()])
+                        overlap = target_batch_sentences[:, i].T == decoder_word_predictions
+                        print(
+                            "Given \n", target_batch_sentences[:, i].T,
+                            "\nTry to predict\n", target_batch_sentences[:, i + 1].T,
+                            "\nPredicted:\n", decoder_word_predictions,
+                            "\nCorrectly predicted: {:.2f} %".format((list(overlap).count(True) / len(overlap) * 100)),
+                            "\n\n\n"
+                        )
+                #bloss /= batch_size
+                loss += bloss
+            else:
+                decoder_in = target_batch[:, 0]
+                for i in range(target_len-1):
+                    # TODO: METHOD TO LIMIT TO SENTENCES STILL ACTIVE IN i (ie NOT PADDING RIGHT NOW)
+                    # PERHAPS NOT NEEDED AS LOSS INGNORES PADS ANYWAY???
+                    decoder_out, current_hidden = decoder(
+                        decoder_in, previous_hidden, encoder_out
+                    )
+                    loss += loss_function(decoder_out, target_batch[:, i+1])
+                    _, words = decoder_out.topk(1)
+                    decoder_in = words.squeeze().detach()  # this is not tested.
+                    previous_hidden = current_hidden
 
-            loss = loss_function(decoder_out3, target_batch3)
-            #print(loss.data[0])
-            batch_losses.append(loss.item())
-
-            # backward and optimize
-            optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+            torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+
             optimizer.step()
-            #print(batch_losses)
+            optimizer.zero_grad()
+
+            batch_loss += loss.item()
+
             batch_time = time.time() - batch_start
+
+            if debug:
+                # TODO: Remove
+                print("\n\n\n")
             print('\r[Epoch {:03d}/{:03d}] Batch {:06d}/{:06d} [{:.1f}/s] '.format(epoch + 1, num_epochs, batch + 1,
                                                                                    iterations, batch_time), end='')
             batch += 1
-        #print(len(batch_losses), iterations)
-        avg_loss = sum(batch_losses)
-        print(batch_losses)
-        #print(avg_loss)
-        epoch_losses.append(avg_loss)
-        print('Time: {:.1f}s Loss: {:.3f} score2?: {:.6f}'.format(time.time() - start, avg_loss, 0))
+
+        print('Time: {:.1f}s Loss: {:.3f}'.format(time.time() - start, batch_loss))
 
         if save_dir is not None:
-            torch.save(model, "{}{}_epoch{}.model".format(save_dir, model.__class__.__name__.lower(), epoch+1))
+            torch.save(encoder, "{}{}_epoch{}.model".format(save_dir, encoder.__class__.__name__.lower(), epoch+1))
+            torch.save(decoder, "{}{}_epoch{}.model".format(save_dir, decoder.__class__.__name__.lower(), epoch+1))
 
 
 if __name__ == "__main__":
     # Define hyperparameters
     num_epochs = 10
-    batch_size = 32
+    batch_size = 128
     learning_rate = 0.01
     embedding_dim = 100
     hidden_dim = 2 * embedding_dim
     max_allowed_sentence_len = 50
-    force = False
+    force = 1
 
     # Prepare training
     training_set = ParallelCorpus(
@@ -113,18 +163,26 @@ if __name__ == "__main__":
     data_loader = DataLoader(training_set, batch_size=batch_size)
     loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad)
     iterations = len(data_loader)
-    # Init model
-    model = Decoder(
-        source_vocab_size=training_set.source_vocab_size, target_vocab_size=training_set.target_vocab_size,
-        embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_sentence_len=max_allowed_sentence_len
+
+    encoder = Encoder(
+        source_vocab_size=training_set.source_vocab_size, embedding_dims=embedding_dim,
+        max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad
+    )
+
+    decoder = Decoder(
+        target_vocab_size=training_set.target_vocab_size,
+        embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_length=max_allowed_sentence_len
     )
     if torch.cuda.is_available():
         loss_function = loss_function.cuda()
-        model = model.cuda()
+        encoder = encoder.cuda()
+        decoder = decoder.cuda()
 
-    optimizer = torch.optim.Adam(list(model.parameters()), learning_rate)
-
+    optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=learning_rate)
 
     # Train
-    train(model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations, save_dir="./")
+    train(
+        encoder, decoder, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations,
+        save_dir="./", dataset=training_set, debug=True
+    )
 
