@@ -161,10 +161,10 @@ class ParallelCorpus(Dataset):
 
     @staticmethod
     def sort_tensors(source, target, source_lengths, target_lengths, pos, source_ids, target_ids):
-        target_lengths, perm_idx = target_lengths.sort(0, descending=True)
+        source_lengths, perm_idx = source_lengths.sort(0, descending=True)
         source_tensor = source[perm_idx]
         target_tensor = target[perm_idx]
-        source_lengths = source_lengths[perm_idx]
+        target_lengths = target_lengths[perm_idx]
         positions = pos[perm_idx]
         source_ids = source_ids[perm_idx]
         target_ids = source_ids[perm_idx]

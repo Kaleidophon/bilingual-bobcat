@@ -40,7 +40,6 @@ class Decoder(nn.Module):
 
         # Feed through linear layer and get attention weights
         attn_out = self.attn(attn_input)  # Scalars Batch x Positions x 1
-        # TODO: Add activation function here?
         attn_weights = F.softmax(attn_out, dim=1)  # Scalars Batch x Positions x 1
 
         # Mask attention to padded tokens
@@ -51,10 +50,12 @@ class Decoder(nn.Module):
         norm = torch.sum(normed_attn_weights, dim=1)
         norm = norm.repeat(1, 50).unsqueeze(2)
         normed_attn_weights = torch.div(normed_attn_weights, norm)
+        normed_attn_weights = normed_attn_weights.squeeze(2).unsqueeze(1)
+        contexts = torch.bmm(normed_attn_weights, encoder_outputs).squeeze(1)
 
         # Take weighted average over decoder output to create context vector
-        attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
-        contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
+        #attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
+        #contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
 
         # Concatenate words and their context vectors to feed into the hidden unit
         output = torch.cat((words, contexts), 1).unsqueeze(1)  # Batch x 1 x 2 * Embedding dim
@@ -78,6 +79,7 @@ class Encoder(nn.Module):
         self.embedding_dims = embedding_dims
         self.cat_linear = nn.Linear(2 * embedding_dims, embedding_dims)
         self.pad_index = pad_index
+        self.dropout = nn.Dropout(0.5)
 
     def forward(self, source_sentences, positions):
         words = self.encoder_embeddings(source_sentences)
@@ -88,8 +90,8 @@ class Encoder(nn.Module):
         padded_positions = src_sentences == self.pad_index
 
         cat = torch.cat((words, pos), 2)
-        cat = self.cat_linear(cat)
-        cat = F.tanh(cat)   # Batch x Positions x Embedding dim
+        cat = self.dropout(cat)
+        cat = self.cat_linear(cat)   # Batch x Positions x Embedding dim
         assert cat.size(2) == self.embedding_dims
 
         avg = torch.mean(cat, 1)
