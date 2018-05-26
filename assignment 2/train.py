@@ -128,37 +128,42 @@ if __name__ == "__main__":
 
     # Prepare training
     training_set = ParallelCorpus(
-        source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",
+        source_path="./data/train/train_bpe2.fr", target_path="./data/train/train_bpe2.en",
         max_sentence_length=max_allowed_sentence_len
     )
-    data_loader = DataLoader(training_set, batch_size=batch_size)
-    loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad)
-    iterations = len(data_loader)
-
-    # encoder = Encoder(
+    print(len(training_set.target_w2i))
+    print(training_set.target_vocab_size)
+    print(len(training_set.source_w2i))
+    print(training_set.source_vocab_size)
+    #print(training_set.target_w2i)
+    # data_loader = DataLoader(training_set, batch_size=batch_size)
+    # loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad)
+    # iterations = len(data_loader)
+    #
+    # # encoder = Encoder(
+    # #     source_vocab_size=training_set.source_vocab_size, embedding_dims=embedding_dim,
+    # #     max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad
+    # # )
+    # #
+    # # decoder = Decoder(
+    # #     target_vocab_size=training_set.target_vocab_size,
+    # #     embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_length=max_allowed_sentence_len
+    # # )
+    # model = NMTModel(
     #     source_vocab_size=training_set.source_vocab_size, embedding_dims=embedding_dim,
-    #     max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad
+    #     max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad,
+    #     target_vocab_size=training_set.target_vocab_size, max_length=max_allowed_sentence_len
     # )
     #
-    # decoder = Decoder(
-    #     target_vocab_size=training_set.target_vocab_size,
-    #     embedding_dims=embedding_dim, hidden_dims=hidden_dim, max_length=max_allowed_sentence_len
+    # if torch.cuda.is_available():
+    #     loss_function = loss_function.cuda()
+    #     model = model.cuda()
+    #
+    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    #
+    # # Train
+    # train(
+    #     model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations,
+    #     save_dir="./", dataset=training_set, debug=True
     # )
-    model = NMTModel(
-        source_vocab_size=training_set.source_vocab_size, embedding_dims=embedding_dim,
-        max_sentence_len=max_allowed_sentence_len, hidden_dims=hidden_dim, pad_index=training_set.source_pad,
-        target_vocab_size=training_set.target_vocab_size, max_length=max_allowed_sentence_len
-    )
-
-    if torch.cuda.is_available():
-        loss_function = loss_function.cuda()
-        model = model.cuda()
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    # Train
-    train(
-        model, num_epochs, loss_function, optimizer, training_set.target_vocab_size, force, iterations,
-        save_dir="./", dataset=training_set, debug=True
-    )
 

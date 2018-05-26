@@ -13,9 +13,10 @@ import torch
 
 # PROJECT
 from corpus import ParallelCorpus
+from seq2seq import Seq2Seq
 
 
-def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
+def evaluate(model, eval_set, target_path, reference_file_path):
     data_loader = DataLoader(eval_set, batch_size=5)
     softmax = nn.Softmax(dim=1)
     idx2word = evaluation_set.target_i2w
@@ -25,30 +26,16 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
     # Decode
     # for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
     for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
-        # TODO: Don't use target sentences for prediction!
-        predicted_batch_words = []
-        max_len = source_lengths.max()
-        encoder_output, hidden = encoder(source_batch, batch_positions)
+        decoder_out = model(
+            input_src=source_batch, input_trg=target_batch, src_lengths=source_lengths
+        )
 
-        decoder_in = target_batch[:, 0]
-        for i in range(50):  # TODO: Use variable here
-            # TODO: METHOD TO LIMIT TO SENTENCES STILL ACTIVE IN i (ie NOT PADDING RIGHT NOW)
-            # PERHAPS NOT NEEDED AS LOSS INGNORES PADS ANYWAY???
-            decoder_out, hidden = decoder(
-                decoder_in, encoder_output, max_len, previous_hidden=hidden
-            )
-            _, words = decoder_out.topk(1)
-            decoder_in = words.squeeze().detach()  # this is not tested.
+        # Get predicted word for every batch instance
+        normalized_output = softmax(decoder_out)
+        predictions = normalized_output.max(2)[1]  # Only get indices
 
-            # Get predicted word for every batch instance
-            normalized_output = softmax(decoder_out)
-            predictions = normalized_output.max(1)[1]  # Only get indices
-            predicted_batch_words.append(predictions.unsqueeze(1))
-
-        predicted_batch_words = torch.cat(predicted_batch_words, 1)
-
-        for sentence_index in range(predicted_batch_words.shape[0]):
-            token_indices = list(predicted_batch_words[sentence_index, :].numpy())
+        for sentence_index in range(predictions.shape[0]):
+            token_indices = list(predictions[sentence_index, :].numpy())
 
             tokens = list(map(lambda idx: idx2word[idx], token_indices))
             eos_index = len(tokens)
@@ -57,7 +44,7 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
 
             tokens = tokens[:eos_index]  # Cut off after first end of sentence token
 
-            translated_sentence = " ".join(tokens).replace("@@ ", "")
+            translated_sentence = " ".join(tokens).replace("@@ ", "").replace("@@", "")
             print(translated_sentence)
             translated_sentences.append(translated_sentence)
 
@@ -78,8 +65,6 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
 
 
 if __name__ == "__main__":
-    encoder = torch.load("./encoder_epoch1.model")
-    decoder = torch.load("./decoder_epoch1.model")
     max_allowed_sentence_len = 50
     training_set = ParallelCorpus(
         source_path="./data/train/train_bpe.fr", target_path="./data/train/train_bpe.en",
@@ -89,8 +74,12 @@ if __name__ == "__main__":
         source_path="./data/test/test_2017_flickr_bpe.fr", target_path="./data/test/test_2017_flickr_bpe.en",
         max_sentence_length=max_allowed_sentence_len, use_indices_from=training_set
     )
+
+    model = torch.load("./seq2seq_10_alpha_cpu.model")
+
     evaluate(
-        encoder, decoder, evaluation_set, target_path="./eval_out.txt",
+        model, evaluation_set, target_path="./eval_out.txt",
         reference_file_path="./data/test/test_2017_flickr_truecased.en"
     )
+
 

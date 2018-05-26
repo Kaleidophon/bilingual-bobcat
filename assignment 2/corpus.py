@@ -132,7 +132,7 @@ class ParallelCorpus(Dataset):
         idx2word = defaultdict(lambda: "<unk>", {idx: w for (w, idx) in word2idx.items()})
 
         # After reading the data, unknown word just return the index of the <unk> token (don't generate new indices)
-        word2idx = defaultdict(lambda: word2idx["<unk>"], word2idx)
+        word2idx.default_factory = lambda: word2idx["<unk>"]
 
         return indexed_sentences, vocab, word2idx, idx2word, vocab_size, sentence_lengths
 
