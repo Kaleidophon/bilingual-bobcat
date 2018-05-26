@@ -73,6 +73,7 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterat
 
             predicted_words = model.forward(source_batch, source_lengths, batch_positions, target_batch=target_batch)
 
+            finished_batches = set()
             for i in range(target_len - 1):
                 predicted_words_at_pos = predicted_words[i]
                 predicted_words_at_pos = F.softmax(predicted_words_at_pos, dim=1)
@@ -85,10 +86,15 @@ def train(model, num_epochs, loss_function, optimizer, target_dim, force, iterat
                     "\n\n"
                 )
 
-                loss += loss_function(predicted_words_at_pos, target_batch[:, i + 1])
+                # Don't compute loss if <eos> has already been predicted
+                for batch_id in range(batch_size):
+                    if predicted_words_idx[batch_id] != dataset.target_w2i["<eos>"] and batch_id not in finished_batches:
+                        loss += loss_function(predicted_words_at_pos[batch_id].unsqueeze(0), target_batch[batch_id, i + 1].unsqueeze(0))
+                    else:
+                        finished_batches.add(batch_id)
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+            #torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
 
             optimizer.step()
             optimizer.zero_grad()
@@ -126,7 +132,7 @@ if __name__ == "__main__":
         max_sentence_length=max_allowed_sentence_len
     )
     data_loader = DataLoader(training_set, batch_size=batch_size)
-    loss_function = nn.NLLLoss(ignore_index=training_set.target_pad)
+    loss_function = nn.CrossEntropyLoss(ignore_index=training_set.target_pad)
     iterations = len(data_loader)
 
     # encoder = Encoder(

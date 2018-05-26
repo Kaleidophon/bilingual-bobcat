@@ -29,7 +29,7 @@ class NMTModel(nn.Module):
         max_len = source_lengths.max()
         predicted_words = []
 
-        encoder_out, previous_hidden, padded_positions = self.encoder(source_batch, batch_positions)
+        encoder_out, previous_hidden, padded_positions = self.encoder(source_batch, batch_positions, source_lengths)
 
         use_teacher_forcing = True if random.random() <= teacher_forcing else False
 
@@ -100,13 +100,11 @@ class Decoder(nn.Module):
         # apply softmax to the energys
         #print("raw align", alignment.size())
         alignment = F.softmax(energy, dim=1).unsqueeze(2)
-        attn_weights = alignment
 
         # make context vector by element wise mul
-        #print("Align", alignment.size(), "enc out", encoder_outputs.size())
-        contexts = alignment * encoder_outputs
+        #contexts = alignment * encoder_outputs
 
-        contexts = torch.sum(contexts, 1)
+        #contexts = torch.sum(contexts, 1)
 
         # # Concatenate current words and hidden states for attention
         # # Batch x Positions x Hidden dim
@@ -118,17 +116,17 @@ class Decoder(nn.Module):
         # attn_weights = F.softmax(attn_out, dim=1)  # Scalars Batch x Positions x 1
         #
         # # Mask attention to padded tokens
-        # normed_attn_weights = attn_weights.clone()
-        # normed_attn_weights[padded_positions] = 0
+        normed_attn_weights = alignment.clone()
+        normed_attn_weights[padded_positions] = 0
         #
         # # Renormalize weights
-        # norm = torch.sum(normed_attn_weights, dim=1)
-        # norm = norm.repeat(1, 50).unsqueeze(2)
-        # normed_attn_weights = torch.div(normed_attn_weights, norm)
-        #
+        norm = torch.sum(normed_attn_weights, dim=1)
+        norm = norm.repeat(1, 50).unsqueeze(2)
+        normed_attn_weights = torch.div(normed_attn_weights, norm)
+
         # # Take weighted average over decoder output to create context vector
-        # attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
-        # contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
+        attn_applied = torch.mul(normed_attn_weights, encoder_outputs)  # Batch x Positions x Embedding dim
+        contexts = torch.sum(attn_applied, dim=1)  # Batches x Embedding dim
 
         # Concatenate words and their context vectors to feed into the hidden unit
         #output = torch.cat((words, contexts), 1).unsqueeze(1)  # Batch x 1 x 2 * Embedding dim
@@ -155,9 +153,9 @@ class Encoder(nn.Module):
         self.cat_linear = nn.Linear(2 * embedding_dims, embedding_dims)
         self.pad_index = pad_index
         self.dropout = nn.Dropout(0.5)
-        self.gru = torch.nn.GRU(2 * embedding_dims, hidden_dims)
+        self.gru = nn.GRU(2 * embedding_dims, embedding_dims, batch_first=True)
 
-    def forward(self, source_sentences, positions):
+    def forward(self, source_sentences, positions, source_lengths):
         words = self.encoder_embeddings(source_sentences)
         pos = self.pos_embeddings(positions)
 
@@ -168,6 +166,7 @@ class Encoder(nn.Module):
         cat = torch.cat((words, pos), 2)
         cat = self.dropout(cat)
         cat = self.cat_linear(cat)   # Batch x Positions x Embedding dim
+        cat = F.tanh(cat)
         assert cat.size(2) == self.embedding_dims
 
         avg = torch.mean(cat, 1)
@@ -176,3 +175,26 @@ class Encoder(nn.Module):
         hidden = (hidden.unsqueeze(0), hidden.unsqueeze(0))
 
         return cat, hidden, padded_positions
+
+    # def forward(self, source_sentences, batch_positions, source_lengths):
+    #     words = self.encoder_embeddings(source_sentences)
+    #     #pos = self.pos_embeddings(positions)
+    #
+    #     packed_input = pack_padded_sequence(words, source_lengths, batch_first=True)
+    #     packed_output, _ = self.gru(packed_input)
+    #     gru_out, _ = pad_packed_sequence(packed_output, batch_first=True)
+    #
+    #     # cat = torch.cat((words, pos), 2)
+    #     # cat = self.cat_linear(cat)
+    #     # cat = F.tanh(cat)   # Batch x Positions x Embedding dim
+    #
+    #     # words = pack_padded_sequence
+    #
+    #     # assert cat.size(2) == self.embedding_dims
+    #
+    #     avg = torch.mean(gru_out, 1)
+    #     hidden = self.scale_h0(avg)
+    #     hidden = F.relu(hidden)  # Batch x Hidden dim
+    #     hidden = (hidden.unsqueeze(0), hidden.unsqueeze(0))
+    #
+    #     return gru_out, hidden, None
