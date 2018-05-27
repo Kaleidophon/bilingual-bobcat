@@ -20,7 +20,7 @@ from seq2seq import Seq2Seq, Encoder
 def evaluate(encoder, decoder, eval_set, target_path, reference_path="./reference.en"):
     data_loader = DataLoader(eval_set, batch_size=5)
     idx2word = evaluation_set.target_i2w
-    sorted_sentence_ids = evaluation_set.target_sentence_ids.cpu().numpy()
+    sorted_sentence_ids = evaluation_set.source_sentence_ids.cpu().numpy()
     translated_sentences = []
 
     # Decode
@@ -31,11 +31,10 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_path="./referenc
         )
         decoder_out = decoder(
             encoder_out=encoder_out, h_t=h_t,
-            input_trg=target_batch, source_lengths=source_lengths, teacher=True
+            input_trg=target_batch, source_lengths=source_lengths, teacher=False
         )
 
         # Get predicted word for every batch instance
-        #normalized_output = F.softmax(decoder_out, dim=2)
         predictions = decoder_out.max(2)[1]  # Only get indices
 
         for sentence_index in range(predictions.shape[0]):
@@ -64,7 +63,7 @@ def evaluate(encoder, decoder, eval_set, target_path, reference_path="./referenc
 
     # Write reference file
     with codecs.open(reference_path, "wb", "utf-8") as reference_file:
-        for sentence in evaluation_set.target_sentences:
+        for sentence in eval_set.target_sentences:
             sentence = " ".join(sentence).replace("@@ ", "").replace("@@", "")
             reference_file.write("{}\n".format(sentence))
 
