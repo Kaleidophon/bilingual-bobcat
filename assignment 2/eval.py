@@ -13,10 +13,10 @@ import torch
 
 # PROJECT
 from corpus import ParallelCorpus
-from seq2seq import Seq2Seq
+from seq2seq import Seq2Seq, Encoder
 
 
-def evaluate(model, eval_set, target_path, reference_file_path):
+def evaluate(encoder, decoder, eval_set, target_path, reference_file_path):
     data_loader = DataLoader(eval_set, batch_size=5)
     softmax = nn.Softmax(dim=1)
     idx2word = evaluation_set.target_i2w
@@ -26,8 +26,13 @@ def evaluate(model, eval_set, target_path, reference_file_path):
     # Decode
     # for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
     for source_batch, target_batch, source_lengths, target_lengths, batch_positions in data_loader:
-        decoder_out = model(
-            input_src=source_batch, input_trg=target_batch, src_lengths=source_lengths
+
+        encoder_out, h_t = encoder(
+            input_src=source_batch, src_lengths=source_lengths, positions=batch_positions,
+        )
+        decoder_out = decoder(
+            encoder_out=encoder_out, h_t=h_t,
+            input_trg=target_batch, source_lengths=source_lengths, teacher=False
         )
 
         # Get predicted word for every batch instance
@@ -75,10 +80,11 @@ if __name__ == "__main__":
         max_sentence_length=max_allowed_sentence_len, use_indices_from=training_set
     )
 
-    model = torch.load("./seq2seq_10_alpha_cpu.model")
+    encoder = torch.load("./encoder_cpu.model")
+    decoder = torch.load("./decoder_cpu.model")
 
     evaluate(
-        model, evaluation_set, target_path="./eval_out.txt",
+        encoder, decoder, evaluation_set, target_path="./eval_out.txt",
         reference_file_path="./data/test/test_2017_flickr_truecased.en"
     )
 
