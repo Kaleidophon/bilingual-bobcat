@@ -25,9 +25,8 @@ class ParallelCorpus(Dataset):
         # Enable a way to read multiple paths into one corpus if wanted
         # Read in all the data
         self.max_sentence_length = max_sentence_length
-        self.source_sentences, skip_sentences = self.read_corpus_file(source_path, self.max_sentence_length)
-        self.target_sentences, _ = self.read_corpus_file(
-            target_path, self.max_sentence_length, other_skip_sentences=skip_sentences
+        self.source_sentences, self.target_sentences = self.read_corpus_files(
+            source_path, target_path, self.max_sentence_length
         )
 
         self.size = len(self.source_sentences)
@@ -79,24 +78,24 @@ class ParallelCorpus(Dataset):
         return reduce(_combine_lists, sentences_per_path)
 
     @staticmethod
-    def read_corpus_file(path, max_sentence_length, other_skip_sentences=set(), filter_characters=[]):
-        sentences = []
-        skip_sentences = set()  # Keep track of sentences which are skipped due to length so they can be skipped in the
-        # other corpus file too
+    def read_corpus_files(source_path, target_path, max_sentence_length, target_sentence_delimiters=True):
+        """
+        Read two files belonging to the same parallel corpus at once.
+        """
+        source_sentences, target_sentences = [], []
+        # Target sentence might have to accommodate two sentence delimiters <bos> and <eos>, therefore reduce max length
+        target_max_sentence_length = max_sentence_length - 2 if target_sentence_delimiters else max_sentence_length
 
-        with codecs.open(path, "rb", "utf-8") as corpus:
-            for i, line in enumerate(corpus.readlines()):
-                tokens = [token for token in line.strip().split() if token not in filter_characters]
+        with codecs.open(source_path, "rb", "utf-8") as source_corpus, codecs.open(target_path, "rb", "utf-8") as target_corpus:
+            for i, (source_line, target_line) in enumerate(zip(source_corpus.readlines(), target_corpus.readlines())):
+                source_tokens, target_tokens = source_line.strip().split(), target_line.strip().split()
 
-                # Filter out sentences that are too long if you're reading the first part of the parallel corpus
-                # Or filter them out if they have been filtered out in the previous part of the corpus
-                if (len(tokens) <= max_sentence_length and len(other_skip_sentences) == 0) \
-                        or i not in other_skip_sentences:
-                    sentences.append(tokens)
-                else:
-                    skip_sentences.add(i)
+                # Both sentences have to be shorter than the maximum specified length
+                if len(source_tokens) <= max_sentence_length and len(target_tokens) <= target_max_sentence_length:
+                    source_sentences.append(source_tokens)
+                    target_sentences.append(target_tokens)
 
-        return sentences, skip_sentences
+        return source_sentences, target_sentences
 
     def index_corpus(self, sentences, max_vocab_size=np.inf, add_sentence_delimiters=False, given_word2idx=None):
         # Use indices create on other set if given
@@ -133,7 +132,7 @@ class ParallelCorpus(Dataset):
         idx2word = defaultdict(lambda: "<unk>", {idx: w for (w, idx) in word2idx.items()})
 
         # After reading the data, unknown word just return the index of the <unk> token (don't generate new indices)
-        word2idx = defaultdict(lambda: word2idx["<unk>"], word2idx)
+        word2idx.default_factory = lambda: word2idx["<unk>"]
 
         return indexed_sentences, vocab, word2idx, idx2word, vocab_size, sentence_lengths
 
@@ -161,10 +160,10 @@ class ParallelCorpus(Dataset):
 
     @staticmethod
     def sort_tensors(source, target, source_lengths, target_lengths, pos, source_ids, target_ids):
-        target_lengths, perm_idx = target_lengths.sort(0, descending=True)
+        source_lengths, perm_idx = source_lengths.sort(0, descending=True)
         source_tensor = source[perm_idx]
         target_tensor = target[perm_idx]
-        source_lengths = source_lengths[perm_idx]
+        target_lengths = target_lengths[perm_idx]
         positions = pos[perm_idx]
         source_ids = source_ids[perm_idx]
         target_ids = source_ids[perm_idx]
